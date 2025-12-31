@@ -1,0 +1,250 @@
+#ifndef INTER_H
+#define INTER_H
+
+#include "lexer.h"
+#include "symbols.h"
+#include <stddef.h>
+
+/* Node */
+
+struct Node {
+    int lexline;
+    void (*gen)(struct Node *self, int b, int a);
+    void (*jumping)(struct Node *self, int t, int f);
+    char *(*tostring)(struct Node *self);
+};
+
+struct Node *node_new();
+void node_error(struct Node *self, const char *msg);
+int  node_newlabel();
+void node_emitlabel(int i);
+void node_emit(const char *fmt, ...);
+
+/* Expr */
+
+struct Expr {
+    struct Node base;
+    struct lexer_token *op;
+    struct Type *type;
+};
+
+struct Expr *expr_new(struct lexer_token *tok, struct Type *type);
+
+/* Stmt */
+
+struct Stmt {
+    struct Node base;
+    int after;
+};
+
+extern struct Stmt *Stmt_Null;
+extern struct Stmt *Stmt_Enclosing;
+
+struct Stmt *stmt_new();
+
+/* Op */
+
+struct Op {
+    struct Expr base;
+};
+
+struct Op *op_new(struct lexer_token *tok, struct Type *type);
+
+/* Logical */
+
+struct Logical {
+    struct Expr base;
+    struct Expr *e1;
+    struct Expr *e2;
+};
+
+struct Logical *logical_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
+
+/* Access */
+
+struct Access {
+    struct Op base;
+    struct Expr *array;
+    struct Expr *index;
+};
+
+struct Access *access_new(struct Expr *array, struct Expr *index, struct Type *type);
+
+/* And */
+
+struct And {
+    struct Logical base;
+};
+
+struct And *and_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
+
+/* Arith */
+
+struct Arith {
+    struct Op base;
+    struct Expr *e1;
+    struct Expr *e2;
+};
+
+struct Arith *arith_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
+
+/* Break */
+
+struct Break {
+    struct Stmt base;
+    struct Stmt *stmt;
+};
+
+struct Break *break_new();
+
+/* Constant */
+
+struct Constant {
+    struct Expr base;
+};
+
+struct Constant *constant_new(struct lexer_token *tok, struct Type *type);
+struct Constant *constant_int(int value);
+
+extern struct Constant *Constant_true;
+extern struct Constant *Constant_false;
+
+/* Do */
+
+struct Do {
+    struct Stmt base;
+    struct Stmt *stmt;
+    struct Expr *expr;
+};
+
+struct Do *do_new();
+void do_init(struct Do *d, struct Stmt *s, struct Expr *x);
+
+/* Else */
+
+struct Else {
+    struct Stmt base;
+    struct Expr *expr;
+    struct Stmt *stmt1;
+    struct Stmt *stmt2;
+};
+
+struct Else *else_new(struct Expr *expr, struct Stmt *stmt1, struct Stmt *stmt2);
+
+/* For */
+
+struct For {
+    struct Stmt base;
+    struct Stmt *init;
+    struct Expr *cond;
+    struct Stmt *step;
+    struct Stmt *body;
+};
+
+struct For *for_new(struct Stmt *init, struct Expr *cond, struct Stmt *step, struct Stmt *body);
+
+/* Id */
+
+struct Id {
+    struct Expr base;
+    int offset;
+};
+
+struct Id *id_new(struct lexer_token *word, struct Type *type, int offset);
+
+/* If */
+
+struct If {
+    struct Stmt base;
+    struct Expr *expr;
+    struct Stmt *stmt;
+};
+
+struct If *if_new(struct Expr *expr, struct Stmt *stmt);
+
+/* Not */
+
+struct Not {
+    struct Logical base;
+};
+
+struct Not *not_new(struct lexer_token *tok, struct Expr *x2);
+
+/* Or */
+
+struct Or {
+    struct Logical base;
+};
+
+struct Or *or_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);
+
+/* Rel */
+
+struct Rel {
+    struct Logical base;
+};
+
+struct Rel *rel_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);
+
+/* Seq */
+
+struct Seq {
+    struct Stmt base;
+    struct Stmt *s1;
+    struct Stmt *s2;
+};
+
+struct Seq *seq_new(struct Stmt *s1, struct Stmt *s2);
+
+/* Set */
+
+struct Set {
+    struct Stmt base;
+    struct Id   *id;
+    struct Expr *expr;
+};
+
+struct Set *set_new(struct Id *id, struct Expr *expr);
+
+/* SetElem */
+
+struct SetElem {
+    struct Stmt base;
+    struct Id   *array;
+    struct Expr *index;
+    struct Expr *expr;
+};
+
+struct SetElem *setelem_new(struct Access *x, struct Expr *y);
+
+/* Temp */
+
+struct Temp {
+    struct Expr base;
+    int number;
+};
+
+struct Temp *temp_new(struct Type *type);
+
+/* Unary */
+
+struct Unary {
+    struct Op base;
+    struct Expr *expr;
+};
+
+struct Unary *unary_new(struct lexer_token *tok, struct Expr *expr);
+
+/* While */
+
+struct While {
+    struct Stmt base;
+    struct Expr *expr;
+    struct Stmt *stmt;
+};
+
+struct While *while_new();
+void while_init(struct While *w, struct Expr *expr, struct Stmt *stmt);
+
+
+#endif
