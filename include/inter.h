@@ -93,8 +93,8 @@ struct Arith *arith_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e
 /* ===== Break ===== */
 
 struct Break {
-    struct Stmt *stmt;
     struct Stmt  base;
+    struct Stmt *stmt;
 };
 
 struct Break *break_new(void);
@@ -102,11 +102,14 @@ struct Break *break_new(void);
 /* ===== Constant ===== */
 
 struct Constant {
-    struct Expr base;
+    struct Expr base;   
+    int int_val;
+    float real_val;
 };
 
 struct Constant *constant_new(struct lexer_token *tok, struct Type *type);
 struct Constant *constant_int(int value);
+struct Constant *constant_float(float v);
 
 extern struct Constant *Constant_true;
 extern struct Constant *Constant_false;

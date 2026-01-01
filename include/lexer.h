@@ -24,6 +24,7 @@ enum tag {
     TRUE,
     WHILE,
 
+    NOT,
     // function / block symbols
     LPAREN,        // (
     RPAREN,        // )
@@ -58,12 +59,10 @@ enum tag {
 struct lexer_token {
     int tag;
     int line;
-    union {
-        int int_val;
-        float real_val;
-        char *lexeme;
-        char ch;
-    };
+    int int_val;
+    float real_val;
+    char *lexeme;
+    char ch;
 };
 
 struct lexer {

@@ -24,9 +24,71 @@ static struct Type *basic_type_from_token(struct lexer_token *tok)
     return NULL;
 }
 
+
+static char *token_to_string(struct lexer_token *tok)
+{
+    if (!tok) return strdup("<?>");
+
+    if (tok->lexeme)
+        return strdup(tok->lexeme);
+
+    if (tok->tag == NUM) {
+        char *buf = malloc(32);
+        snprintf(buf, 32, "%d", tok->int_val);
+        return buf;
+    }
+
+    if (tok->tag == REAL) {
+        char *buf = malloc(32);
+        snprintf(buf, 32, "%f", tok->real_val);
+        return buf;
+    }
+
+    // 显式处理所有运算符 / 关键符号
+    switch (tok->tag) {
+    case PLUS:       return strdup("+");
+    case MINUS:      return strdup("-");
+    case STAR:       return strdup("*");
+    case SLASH:      return strdup("/");
+    case MOD:        return strdup("%");
+    case ASSIGN:     return strdup("=");
+    case ADD_ASSIGN: return strdup("+=");
+    case SUB_ASSIGN: return strdup("-=");
+    case MUL_ASSIGN: return strdup("*=");
+    case DIV_ASSIGN: return strdup("/=");
+    case INC:        return strdup("++");
+    case DEC:        return strdup("--");
+    case EQ:         return strdup("==");
+    case NE:         return strdup("!=");
+    case LE:         return strdup("<=");
+    case GE:         return strdup(">=");
+    case AND:        return strdup("&&");
+    case OR:         return strdup("||");
+    case LPAREN:     return strdup("(");
+    case RPAREN:     return strdup(")");
+    case LBRACE:     return strdup("{");
+    case RBRACE:     return strdup("}");
+    case LBRACKET:   return strdup("[");
+    case RBRACKET:   return strdup("]");
+    case COMMA:      return strdup(",");
+    case SEMICOLON:  return strdup(";");
+    case DOT:        return strdup(".");
+    default: {
+        char *buf = malloc(16);
+        snprintf(buf, 16, "#%d", tok->tag);
+        return buf;
+    }
+    }
+}
+
 static void parser_move(struct Parser *p)
 {
     p->look = lexer_scan(p->lex);
+    if (p->look) { 
+        char *s = token_to_string(p->look); 
+        printf("TOKEN: tag=%d, str=%s\n", p->look->tag, s); 
+        free(s); 
+    }
 }
 
 static void parser_error(struct Parser *p, const char *msg)
@@ -295,7 +357,7 @@ struct Expr *parser_unary(struct Parser *p)
         struct lexer_token *tok = p->look;
         parser_move(p);
         return (struct Expr *)unary_new(tok, parser_unary(p));
-    } else if (p->look->tag == '!') {
+    } else if (p->look->tag == NOT) {
         struct lexer_token *tok = p->look;
         parser_move(p);
         return (struct Expr *)not_new(tok, parser_unary(p));
@@ -320,9 +382,9 @@ struct Expr *parser_factor(struct Parser *p)
         return x;
 
     case REAL:
-        /* 如需支持浮点常量，可在此扩展 constant_float */
-        parser_error(p, "real constant not implemented");
-        return NULL;
+        x = (struct Expr *)constant_float(p->look->real_val);
+        parser_move(p);
+        return x;
 
     case TRUE:
         x = (struct Expr *)Constant_true;

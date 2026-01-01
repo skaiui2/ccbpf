@@ -5,7 +5,7 @@
 #include <stdarg.h>
 
 static struct Type TYPE_INT_OBJ   = { TYPE_INT,   4 };
-static struct Type TYPE_FLOAT_OBJ = { TYPE_FLOAT, 4 };
+static struct Type TYPE_FLOAT_OBJ = { TYPE_FLOAT, 8 };
 static struct Type TYPE_BOOL_OBJ  = { TYPE_BOOL,  1 };
 
 struct Type *Type_Int   = &TYPE_INT_OBJ;
@@ -53,9 +53,41 @@ static char *token_to_string(struct lexer_token *tok)
         return buf;
     }
 
-    char *buf = malloc(8);
-    snprintf(buf, 8, "%c", (char)tok->tag);
-    return buf;
+    // 显式处理所有运算符 / 关键符号
+    switch (tok->tag) {
+    case PLUS:       return strdup("+");
+    case MINUS:      return strdup("-");
+    case STAR:       return strdup("*");
+    case SLASH:      return strdup("/");
+    case MOD:        return strdup("%");
+    case ASSIGN:     return strdup("=");
+    case ADD_ASSIGN: return strdup("+=");
+    case SUB_ASSIGN: return strdup("-=");
+    case MUL_ASSIGN: return strdup("*=");
+    case DIV_ASSIGN: return strdup("/=");
+    case INC:        return strdup("++");
+    case DEC:        return strdup("--");
+    case EQ:         return strdup("==");
+    case NE:         return strdup("!=");
+    case LE:         return strdup("<=");
+    case GE:         return strdup(">=");
+    case AND:        return strdup("&&");
+    case OR:         return strdup("||");
+    case LPAREN:     return strdup("(");
+    case RPAREN:     return strdup(")");
+    case LBRACE:     return strdup("{");
+    case RBRACE:     return strdup("}");
+    case LBRACKET:   return strdup("[");
+    case RBRACKET:   return strdup("]");
+    case COMMA:      return strdup(",");
+    case SEMICOLON:  return strdup(";");
+    case DOT:        return strdup(".");
+    default: {
+        char *buf = malloc(16);
+        snprintf(buf, 16, "#%d", tok->tag);
+        return buf;
+    }
+    }
 }
 
 /* ============================================================
@@ -206,6 +238,28 @@ struct Constant *constant_int(int value)
     tok->int_val = value;
     tok->lexeme  = NULL;
     return constant_new(tok, Type_Int);
+}
+
+struct Constant *constant_float(float v)
+{
+    printf("constant_float: v = %f\n", v);
+
+    struct lexer_token *tok = calloc(1, sizeof(struct lexer_token));
+    tok->tag      = REAL;
+    tok->real_val = v;
+    tok->lexeme   = NULL;
+
+    struct Constant *c = malloc(sizeof(struct Constant));
+
+    c->base.op   = tok;          // Expr.op
+    c->base.type = Type_Float;   // Expr.type
+    c->real_val  = v;
+
+    c->base.base.gen      = expr_gen;          // Node.gen
+    c->base.base.jumping  = constant_jumping;  // Node.jumping
+    c->base.base.tostring = constant_tostring; // Node.tostring
+
+    return c;
 }
 
 __attribute__((constructor))

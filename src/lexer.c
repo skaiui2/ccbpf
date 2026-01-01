@@ -138,7 +138,7 @@ struct lexer_token *lexer_scan(struct lexer *lex)
 
         case '!':
             if (readch_match(lex, '=')) return new_lexer_token_char(NE, '!');
-            return new_lexer_token_char('!', '!');
+            return new_lexer_token_char(NOT, '!');
 
         case '<':
             if (readch_match(lex, '=')) return new_lexer_token_char(LE, '<');
