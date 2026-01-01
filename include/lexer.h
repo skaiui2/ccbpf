@@ -16,7 +16,6 @@ enum tag {
     IF,
     INDEX,
     LE,            // <=
-    MINUS,         // -
     NE,            // !=
     NUM,           // integer literal
     OR,            // ||

@@ -1,27 +1,51 @@
-#include "parser.h"
+/* parser.c */
 
-static void parser_move(Parser *p)
+#include "parser.h"
+#include <stdlib.h>
+#include <stdio.h>
+#include <string.h>
+
+/* 由 type/ir 模块提供的全局类型与常量 */
+extern struct Type     *Type_Int;
+extern struct Type     *Type_Float;
+extern struct Type     *Type_Bool;
+extern struct Constant *Constant_true;
+extern struct Constant *Constant_false;
+
+/* basic 关键字到 Type* 的映射：依赖 lexer_reserve 时的 lexeme */
+static struct Type *basic_type_from_token(struct lexer_token *tok)
+{
+    if (!tok || !tok->lexeme) return NULL;
+
+    if (strcmp(tok->lexeme, "int") == 0)   return Type_Int;
+    if (strcmp(tok->lexeme, "float") == 0) return Type_Float;
+    if (strcmp(tok->lexeme, "bool") == 0)  return Type_Bool;
+
+    return NULL;
+}
+
+static void parser_move(struct Parser *p)
 {
     p->look = lexer_scan(p->lex);
 }
 
-static void parser_error(Parser *p, const char *s)
+static void parser_error(struct Parser *p, const char *msg)
 {
-    fprintf(stderr, "near line %d: %s\n", p->lex->line, s);
+    fprintf(stderr, "near line %d: %s \n", p->lex->line, msg);
     exit(1);
 }
 
-static void parser_match(Parser *p, int t)
+static void parser_match(struct Parser *p, int tag)
 {
-    if (p->look->tag == t)
+    if (p->look->tag == tag)
         parser_move(p);
     else
         parser_error(p, "syntax error");
 }
 
-Parser *parser_new(Lexer *lex)
+struct Parser *parser_new(struct lexer *lex)
 {
-    Parser *p = malloc(sizeof(Parser));
+    struct Parser *p = malloc(sizeof(struct Parser));
     p->lex  = lex;
     p->top  = NULL;
     p->used = 0;
@@ -29,289 +53,341 @@ Parser *parser_new(Lexer *lex)
     return p;
 }
 
-void parser_program(Parser *p)
+void parser_program(struct Parser *p)
 {
-    Stmt *s = parser_block(p);
+    struct Stmt *s = parser_block(p);
     int begin = node_newlabel();
     int after = node_newlabel();
     node_emitlabel(begin);
-    s->base.gen((Node *)s, begin, after);
+    s->base.gen((struct Node *)s, begin, after);
     node_emitlabel(after);
 }
 
-Stmt *parser_block(Parser *p)
+struct Stmt *parser_block(struct Parser *p)
 {
-    parser_match(p, '{');
-    Env *saved = p->top;
+    parser_match(p, LBRACE);
+    struct Env *saved = p->top;
     p->top = env_new(p->top);
     parser_decls(p);
-    Stmt *s = parser_stmts(p);
-    parser_match(p, '}');
+    struct Stmt *s = parser_stmts(p);
+    parser_match(p, RBRACE);
     p->top = saved;
     return s;
 }
 
-void parser_decls(Parser *p)
+void parser_decls(struct Parser *p)
 {
-    while (p->look->tag == TAG_BASIC) {
-        Type *tp = parser_type(p);
-        Token *tok = p->look;
-        parser_match(p, TAG_ID);
-        parser_match(p, ';');
-        Id *id = id_new((Word *)tok, tp, p->used);
-        env_put(p->top, tok, id);
+    while (p->look->tag == BASIC) {
+        struct Type *tp = parser_type(p);
+        struct lexer_token *tok = p->look;
+        parser_match(p, ID);
+        parser_match(p, SEMICOLON);
+
+        if (!tok->lexeme)
+            parser_error(p, "identifier without lexeme");
+
+        struct Id *id = id_new(tok, tp, p->used);
+        env_put_var(p->top, tok->lexeme, id);
         p->used += tp->width;
     }
 }
 
-Type *parser_type(Parser *p)
+struct Type *parser_type(struct Parser *p)
 {
-    Type *tp = (Type *)p->look;
-    parser_match(p, TAG_BASIC);
-    if (p->look->tag != '[')
+    if (p->look->tag != BASIC)
+        parser_error(p, "type expected");
+
+    struct Type *tp = basic_type_from_token(p->look);
+    if (!tp)
+        parser_error(p, "unknown basic type");
+
+    parser_match(p, BASIC);
+
+    if (p->look->tag != LBRACKET)
         return tp;
+
     return parser_dims(p, tp);
 }
 
-Type *parser_dims(Parser *p, Type *tp)
+struct Type *parser_dims(struct Parser *p, struct Type *base)
 {
-    parser_match(p, '[');
-    Token *tok = p->look;
-    parser_match(p, TAG_NUM);
-    parser_match(p, ']');
-    if (p->look->tag == '[')
-        tp = parser_dims(p, tp);
-    return (Type *)array_new(((Num *)tok)->value, tp);
+    parser_match(p, LBRACKET);
+    struct lexer_token *tok = p->look;
+    parser_match(p, NUM);
+    parser_match(p, RBRACKET);
+
+    int size = tok->int_val;
+
+    if (p->look->tag == LBRACKET)
+        base = parser_dims(p, base);
+
+    struct Array *arr = array_new(base, size);
+    return (struct Type *)arr;
 }
 
-Stmt *parser_stmts(Parser *p)
+struct Stmt *parser_stmts(struct Parser *p)
 {
-    if (p->look->tag == '}')
+    if (p->look->tag == RBRACE)
         return Stmt_Null;
-    return (Stmt *)seq_new(parser_stmt(p), parser_stmts(p));
+    struct Stmt *this = parser_stmt(p);
+    struct Stmt *other = parser_stmts(p);
+    return (struct Stmt *)seq_new(this, other);
 }
 
-Stmt *parser_stmt(Parser *p)
+struct Stmt *parser_stmt(struct Parser *p)
 {
-    Expr *x;
-    Stmt *s, *s1, *s2;
-    Stmt *saved;
+    struct Expr *x;
+    struct Stmt *s1, *s2;
+    struct Stmt *saved;
 
     switch (p->look->tag) {
-    case ';':
+    case SEMICOLON:
         parser_move(p);
         return Stmt_Null;
-    case TAG_IF:
-        parser_match(p, TAG_IF);
-        parser_match(p, '(');
+
+    case IF:
+        parser_match(p, IF);
+        parser_match(p, LPAREN);
         x = parser_bool(p);
-        parser_match(p, ')');
+        parser_match(p, RPAREN);
         s1 = parser_stmt(p);
-        if (p->look->tag != TAG_ELSE)
-            return (Stmt *)if_new(x, s1);
-        parser_match(p, TAG_ELSE);
+        if (p->look->tag != ELSE)
+            return (struct Stmt *)if_new(x, s1);
+        parser_match(p, ELSE);
         s2 = parser_stmt(p);
-        return (Stmt *)else_new(x, s1, s2);
-    case TAG_WHILE: {
-        While *wn = while_new();
+        return (struct Stmt *)else_new(x, s1, s2);
+
+    case WHILE: {
+        struct While *wn = while_new();
         saved = Stmt_Enclosing;
-        Stmt_Enclosing = (Stmt *)wn;
-        parser_match(p, TAG_WHILE);
-        parser_match(p, '(');
+        Stmt_Enclosing = (struct Stmt *)wn;
+        parser_match(p, WHILE);
+        parser_match(p, LPAREN);
         x = parser_bool(p);
-        parser_match(p, ')');
+        parser_match(p, RPAREN);
         s1 = parser_stmt(p);
         while_init(wn, x, s1);
         Stmt_Enclosing = saved;
-        return (Stmt *)wn;
+        return (struct Stmt *)wn;
     }
-    case TAG_DO: {
-        Do *dn = do_new();
+
+    case DO: {
+        struct Do *dn = do_new();
         saved = Stmt_Enclosing;
-        Stmt_Enclosing = (Stmt *)dn;
-        parser_match(p, TAG_DO);
+        Stmt_Enclosing = (struct Stmt *)dn;
+        parser_match(p, DO);
         s1 = parser_stmt(p);
-        parser_match(p, TAG_WHILE);
-        parser_match(p, '(');
+        parser_match(p, WHILE);
+        parser_match(p, LPAREN);
         x = parser_bool(p);
-        parser_match(p, ')');
-        parser_match(p, ';');
+        parser_match(p, RPAREN);
+        parser_match(p, SEMICOLON);
         do_init(dn, s1, x);
         Stmt_Enclosing = saved;
-        return (Stmt *)dn;
+        return (struct Stmt *)dn;
     }
-    case TAG_BREAK:
-        parser_match(p, TAG_BREAK);
-        parser_match(p, ';');
-        return (Stmt *)break_new();
-    case '{':
+
+    case BREAK:
+        parser_match(p, BREAK);
+        parser_match(p, SEMICOLON);
+        return (struct Stmt *)break_new();
+
+    case LBRACE:
         return parser_block(p);
+
     default:
         return parser_assign(p);
     }
 }
 
-Stmt *parser_assign(Parser *p)
+struct Stmt *parser_assign(struct Parser *p)
 {
-    Stmt *s;
-    Token *t = p->look;
-    parser_match(p, TAG_ID);
-    Id *id = env_get(p->top, t);
+    struct Stmt *s;
+    struct lexer_token *t = p->look;
+    parser_match(p, ID);
+
+    if (!t->lexeme)
+        parser_error(p, "identifier without lexeme");
+
+    struct Id *id = env_get_var(p->top, t->lexeme);
     if (!id)
-        parser_error(p, token_tostring(t));
-    if (p->look->tag == '=') {
+        parser_error(p, "undeclared id");
+
+    if (p->look->tag == ASSIGN) {
         parser_move(p);
-        s = (Stmt *)set_new(id, parser_bool(p));
+        s = (struct Stmt *)set_new(id, parser_bool(p));
     } else {
-        Access *x = parser_offset(p, id);
-        parser_match(p, '=');
-        s = (Stmt *)setelem_new(x, parser_bool(p));
+        struct Access *x = parser_offset(p, id);
+        parser_match(p, ASSIGN);
+        s = (struct Stmt *)setelem_new(x, parser_bool(p));
     }
-    parser_match(p, ';');
+    parser_match(p, SEMICOLON);
     return s;
 }
 
-Expr *parser_bool(Parser *p)
+struct Expr *parser_bool(struct Parser *p)
 {
-    Expr *x = parser_join(p);
-    while (p->look->tag == TAG_OR) {
-        Token *tok = p->look;
+    struct Expr *x = parser_join(p);
+    while (p->look->tag == OR) {
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        x = (Expr *)or_new(tok, x, parser_join(p));
+        x = (struct Expr *)or_new(tok, x, parser_join(p));
     }
     return x;
 }
 
-Expr *parser_join(Parser *p)
+struct Expr *parser_join(struct Parser *p)
 {
-    Expr *x = parser_rel(p);
-    while (p->look->tag == TAG_EQ || p->look->tag == TAG_NEQ) {
-        Token *tok = p->look;
+    struct Expr *x = parser_rel(p);
+    while (p->look->tag == AND) {
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        x = (Expr *)rel_new(tok, x, parser_rel(p));
+        x = (struct Expr *)and_new(tok, x, parser_rel(p));
     }
     return x;
 }
 
-Expr *parser_rel(Parser *p)
+struct Expr *parser_rel(struct Parser *p)
 {
-    Expr *x = parser_expr(p);
+    struct Expr *x = parser_expr(p);
+
     switch (p->look->tag) {
     case '<':
-    case TAG_LEQ:
-    case TAG_GEQ:
-    case '>': {
-        Token *tok = p->look;
+    case '>':
+    case LE:
+    case GE:
+    case EQ:
+    case NE: {
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        return (Expr *)rel_new(tok, x, parser_expr(p));
+        return (struct Expr *)rel_new(tok, x, parser_expr(p));
     }
     default:
         return x;
     }
 }
 
-Expr *parser_expr(Parser *p)
+struct Expr *parser_expr(struct Parser *p)
 {
-    Expr *x = parser_term(p);
-    while (p->look->tag == '+' || p->look->tag == '-') {
-        Token *tok = p->look;
+    struct Expr *x = parser_term(p);
+    while (p->look->tag == PLUS || p->look->tag == MINUS) {
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        x = (Expr *)arith_new(tok, x, parser_term(p));
+        x = (struct Expr *)arith_new(tok, x, parser_term(p));
     }
     return x;
 }
 
-Expr *parser_term(Parser *p)
+struct Expr *parser_term(struct Parser *p)
 {
-    Expr *x = parser_unary(p);
-    while (p->look->tag == '*' || p->look->tag == '/') {
-        Token *tok = p->look;
+    struct Expr *x = parser_unary(p);
+    while (p->look->tag == STAR || p->look->tag == SLASH || p->look->tag == MOD) {
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        x = (Expr *)arith_new(tok, x, parser_unary(p));
+        x = (struct Expr *)arith_new(tok, x, parser_unary(p));
     }
     return x;
 }
 
-Expr *parser_unary(Parser *p)
+struct Expr *parser_unary(struct Parser *p)
 {
-    if (p->look->tag == '-') {
+    if (p->look->tag == MINUS) {
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        return (Expr *)unary_new(Word_minus(), parser_unary(p));
+        return (struct Expr *)unary_new(tok, parser_unary(p));
     } else if (p->look->tag == '!') {
-        Token *tok = p->look;
+        struct lexer_token *tok = p->look;
         parser_move(p);
-        return (Expr *)not_new(tok, parser_unary(p));
+        return (struct Expr *)not_new(tok, parser_unary(p));
     }
     return parser_factor(p);
 }
 
-Expr *parser_factor(Parser *p)
+struct Expr *parser_factor(struct Parser *p)
 {
-    Expr *x = NULL;
+    struct Expr *x = NULL;
+
     switch (p->look->tag) {
-    case '(':
+    case LPAREN:
         parser_move(p);
         x = parser_bool(p);
-        parser_match(p, ')');
+        parser_match(p, RPAREN);
         return x;
-    case TAG_NUM:
-        x = (Expr *)constant_new(p->look, Type_Int);
+
+    case NUM:
+        x = (struct Expr *)constant_int(p->look->int_val);
         parser_move(p);
         return x;
-    case TAG_REAL:
-        x = (Expr *)constant_new(p->look, Type_Float);
+
+    case REAL:
+        /* 如需支持浮点常量，可在此扩展 constant_float */
+        parser_error(p, "real constant not implemented");
+        return NULL;
+
+    case TRUE:
+        x = (struct Expr *)Constant_true;
         parser_move(p);
         return x;
-    case TAG_TRUE:
-        x = (Expr *)Constant_true;
+
+    case FALSE:
+        x = (struct Expr *)Constant_false;
         parser_move(p);
         return x;
-    case TAG_FALSE:
-        x = (Expr *)Constant_false;
-        parser_move(p);
-        return x;
-    case TAG_ID: {
-        Id *id = env_get(p->top, p->look);
+
+    case ID: {
+        if (!p->look->lexeme)
+            parser_error(p, "identifier without lexeme");
+        struct Id *id = env_get_var(p->top, p->look->lexeme);
         if (!id)
             parser_error(p, "undeclared id");
         parser_move(p);
-        if (p->look->tag != '[')
-            return (Expr *)id;
-        return (Expr *)parser_offset(p, id);
+        if (p->look->tag != LBRACKET)
+            return (struct Expr *)id;
+        return (struct Expr *)parser_offset(p, id);
     }
+
     default:
         parser_error(p, "syntax error");
         return NULL;
     }
 }
 
-Access *parser_offset(Parser *p, Id *a)
-{
-    Expr *i;
-    Expr *w;
-    Expr *t1, *t2;
-    Expr *loc;
-    Type *type = a->base.type;
+/* 静态运算符 token，用于 offset 中的 * 和 + */
+static struct lexer_token TOK_MUL  = { STAR,  0, .lexeme = "*" };
+static struct lexer_token TOK_PLUS = { PLUS,  0, .lexeme = "+" };
 
-    parser_match(p, '[');
+struct Access *parser_offset(struct Parser *p, struct Id *a)
+{
+    struct Expr *i;
+    struct Expr *w;
+    struct Expr *t1, *t2;
+    struct Expr *loc;
+    struct Type *type = a->base.type;
+
+    parser_match(p, LBRACKET);
     i = parser_bool(p);
-    parser_match(p, ']');
-    type = ((Array *)type)->type;
-    w = (Expr *)constant_new_num(type->width);
-    t1 = (Expr *)arith_new(token_new('*'), i, w);
+    parser_match(p, RBRACKET);
+
+    struct Array *arr = (struct Array *)type;
+    type = arr->of;
+
+    w   = (struct Expr *)constant_int(type->width);
+    t1  = (struct Expr *)arith_new(&TOK_MUL, i, w);
     loc = t1;
 
-    while (p->look->tag == '[') {
-        parser_match(p, '[');
+    while (p->look->tag == LBRACKET) {
+        parser_match(p, LBRACKET);
         i = parser_bool(p);
-        parser_match(p, ']');
-        type = ((Array *)type)->type;
-        w = (Expr *)constant_new_num(type->width);
-        t1 = (Expr *)arith_new(token_new('*'), i, w);
-        t2 = (Expr *)arith_new(token_new('+'), loc, t1);
+        parser_match(p, RBRACKET);
+
+        arr  = (struct Array *)type;
+        type = arr->of;
+
+        w  = (struct Expr *)constant_int(type->width);
+        t1 = (struct Expr *)arith_new(&TOK_MUL, i, w);
+        t2 = (struct Expr *)arith_new(&TOK_PLUS, loc, t1);
         loc = t2;
     }
 
-    return access_new((Expr *)a, loc, type);
+    return access_new((struct Expr *)a, loc, type);
 }
-

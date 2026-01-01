@@ -73,6 +73,12 @@ void lexer_reserve(struct lexer *lex, const char *lexeme, int tag)
     hashmap_put(&lex->words, w->lexeme, w);
 }
 
+
+static void readch(struct lexer *lex)
+{
+    lex->peek = reader_next_char();
+}
+
 void lexer_init(struct lexer *lex)
 {
     lex->line = 1;
@@ -95,11 +101,6 @@ void lexer_init(struct lexer *lex)
     lexer_reserve(lex, "return", RETURN);
 }
 
-static void readch(struct lexer *lex)
-{
-    lex->peek = reader_next_char();
-}
-
 static int readch_match(struct lexer *lex, char c)
 {
     readch(lex);
@@ -111,14 +112,15 @@ static int readch_match(struct lexer *lex, char c)
 
 struct lexer_token *lexer_scan(struct lexer *lex)
 {
-    for (;;) {
-        readch(lex);
-        if (lex->peek == ' ' || lex->peek == '\t')
+    for (;; readch(lex)) {
+        if (lex->peek == ' ' || lex->peek == '\t') {
             continue;
-        else if (lex->peek == '\n')
+        }
+        else if (lex->peek == '\n') {
             lex->line++;
-        else
+        } else {
             break;
+        }
     }
 
     switch (lex->peek) {
@@ -147,31 +149,37 @@ struct lexer_token *lexer_scan(struct lexer *lex)
             return new_lexer_token_char('>', '>');
 
         case '(':
+            readch(lex);
             return new_lexer_token_char(LPAREN, '(');
 
         case ')':
+            readch(lex);
             return new_lexer_token_char(RPAREN, ')');
 
         case '{':
+            readch(lex);
             return new_lexer_token_char(LBRACE, '{');
 
         case '}':
+            readch(lex);
             return new_lexer_token_char(RBRACE, '}');
 
         case ',':
+            readch(lex);
             return new_lexer_token_char(COMMA, ',');
 
         case ';':
+            readch(lex);
             return new_lexer_token_char(SEMICOLON, ';');
 
         case '+':
             if (readch_match(lex, '+')) return new_lexer_token_char(INC, '+');
-            if (readch_match(lex, '=')) return new_lexer_token_char(ADD_ASSIGN, '+');
+            if (lex->peek == '=') return new_lexer_token_char(ADD_ASSIGN, '+');
             return new_lexer_token_char(PLUS, '+');
 
         case '-':
             if (readch_match(lex, '-')) return new_lexer_token_char(DEC, '-');
-            if (readch_match(lex, '=')) return new_lexer_token_char(SUB_ASSIGN, '-');
+            if (lex->peek == '=') return new_lexer_token_char(SUB_ASSIGN, '-');
             return new_lexer_token_char(MINUS, '-');
 
         case '*':
@@ -183,15 +191,19 @@ struct lexer_token *lexer_scan(struct lexer *lex)
             return new_lexer_token_char(SLASH, '/');
 
         case '%':
+            readch(lex);
             return new_lexer_token_char(MOD, '%');
 
         case '.':
+            readch(lex);
             return new_lexer_token_char(DOT, '.');
 
         case '[':
+            readch(lex);
             return new_lexer_token_char(LBRACKET, '[');
 
         case ']':
+            readch(lex);
             return new_lexer_token_char(RBRACKET, ']');
 
     }

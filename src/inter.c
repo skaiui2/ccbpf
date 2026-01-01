@@ -2,573 +2,93 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <stdarg.h>
 
+static struct Type TYPE_INT_OBJ   = { TYPE_INT,   4 };
+static struct Type TYPE_FLOAT_OBJ = { TYPE_FLOAT, 4 };
+static struct Type TYPE_BOOL_OBJ  = { TYPE_BOOL,  1 };
 
-struct Stmt *Stmt_Enclosing = NULL;
-struct Stmt *Stmt_Null      = NULL;
+struct Type *Type_Int   = &TYPE_INT_OBJ;
+struct Type *Type_Float = &TYPE_FLOAT_OBJ;
+struct Type *Type_Bool  = &TYPE_BOOL_OBJ;
 
+/* ============================================================
+ *  工具：类型提升
+ * ============================================================ */
 
-struct Constant *Constant_true  = NULL;
-struct Constant *Constant_false = NULL;
-
-
-void op_init(Op *op, Token *tok, Type *type)
+static struct Type *type_max(struct Type *a, struct Type *b)
 {
-    op->base.tok  = tok;
-    op->base.type = type;
+    if (!a || !b) return NULL;
 
-    op->base.base.gen      = NULL;
-    op->base.base.jumping  = NULL;
-    op->base.base.tostring = NULL;
+    if (a->tag == TYPE_FLOAT || b->tag == TYPE_FLOAT)
+        return Type_Float;
+    if (a->tag == TYPE_INT || b->tag == TYPE_INT)
+        return Type_Int;
+    if (a->tag == TYPE_CHAR && b->tag == TYPE_CHAR)
+        return a;
+
+    return NULL;
 }
 
-void logical_init(Logical *l, Token *tok, Expr *e1, Expr *e2)
+/* ============================================================
+ *  token -> string
+ * ============================================================ */
+
+static char *token_to_string(struct lexer_token *tok)
 {
-    l->base.tok  = tok;
-    l->base.type = NULL;
+    if (!tok) return strdup("<?>");
 
-    l->e1 = e1;
-    l->e2 = e2;
+    if (tok->lexeme)
+        return strdup(tok->lexeme);
 
-    l->base.base.gen      = NULL;
-    l->base.base.jumping  = NULL;
-    l->base.base.tostring = NULL;
-}
+    if (tok->tag == NUM) {
+        char *buf = malloc(32);
+        snprintf(buf, 32, "%d", tok->int_val);
+        return buf;
+    }
 
+    if (tok->tag == REAL) {
+        char *buf = malloc(32);
+        snprintf(buf, 32, "%f", tok->real_val);
+        return buf;
+    }
 
-static Expr *access_gen(Node *self);
-static void  access_jumping(Node *self, int t, int f);
-static char *access_tostring(Node *self);
-
-Access *access_new(Expr *array, Expr *index, Type *type)
-{
-    Access *a = malloc(sizeof(Access));
-
-    op_init(&a->base, token_new("[]", TAG_INDEX), type);
-
-    a->base.base.base.gen      = access_gen;
-    a->base.base.base.jumping  = access_jumping;
-    a->base.base.base.tostring = access_tostring;
-
-    a->array = array;
-    a->index = index;
-
-    return a;
-}
-
-static Expr *access_gen(Node *self)
-{
-    Access *a = (Access *)self;
-
-    Expr *r = a->index->base.base.gen
-        ? (Expr *)a->index->base.base.gen((Node *)a->index)
-        : a->index;
-
-    return (Expr *)access_new(a->array, r, a->base.base.type);
-}
-
-static void access_jumping(Node *self, int t, int f)
-{
-    Access *a = (Access *)self;
-    char *s = a->base.base.base.tostring((Node *)a);
-    emit_jumps(s, t, f);
-}
-
-static char *access_tostring(Node *self)
-{
-    Access *a = (Access *)self;
-
-    char *arr = a->array->base.base.tostring((Node *)a->array);
-    char *idx = a->index->base.base.tostring((Node *)a->index);
-
-    size_t len = strlen(arr) + strlen(idx) + 10;
-    char *buf = malloc(len);
-
-    snprintf(buf, len, "%s [ %s ]", arr, idx);
+    char *buf = malloc(8);
+    snprintf(buf, 8, "%c", (char)tok->tag);
     return buf;
 }
 
 /* ============================================================
- *                        And
+ *  Node
  * ============================================================ */
 
-static void and_jumping(Node *self, int t, int f);
+static int g_labels = 0;
 
-And *and_new(Token *tok, Expr *e1, Expr *e2)
+struct Node *node_new(void)
 {
-    And *a = malloc(sizeof(And));
-
-    logical_init(&a->base, tok, e1, e2);
-
-    a->base.base.base.jumping = and_jumping;
-
-    return a;
-}
-
-static void and_jumping(Node *self, int t, int f)
-{
-    And *a = (And *)self;
-
-    int label = (f != 0) ? f : newlabel();
-
-    a->base.e1->base.base.jumping((Node *)a->base.e1, 0, label);
-    a->base.e2->base.base.jumping((Node *)a->base.e2, t, f);
-
-    if (f == 0)
-        emitlabel(label);
-}
-
-/* ============================================================
- *                        Arith
- * ============================================================ */
-
-static Expr *arith_gen(Node *self);
-static char *arith_tostring(Node *self);
-
-Arith *arith_new(Token *tok, Expr *e1, Expr *e2)
-{
-    Arith *a = malloc(sizeof(Arith));
-
-    op_init(&a->base, tok, NULL);
-
-    a->e1 = e1;
-    a->e2 = e2;
-
-    a->base.base.type = type_max(e1->type, e2->type);
-    if (!a->base.base.type)
-        error("type error");
-
-    a->base.base.base.gen      = arith_gen;
-    a->base.base.base.tostring = arith_tostring;
-
-    return a;
-}
-
-static Expr *arith_gen(Node *self)
-{
-    Arith *a = (Arith *)self;
-
-    Expr *r1 = a->e1->base.base.gen
-        ? (Expr *)a->e1->base.base.gen((Node *)a->e1)
-        : a->e1;
-
-    Expr *r2 = a->e2->base.base.gen
-        ? (Expr *)a->e2->base.base.gen((Node *)a->e2)
-        : a->e2;
-
-    return (Expr *)arith_new(a->base.base.tok, r1, r2);
-}
-
-static char *arith_tostring(Node *self)
-{
-    Arith *a = (Arith *)self;
-
-    char *s1 = a->e1->base.base.tostring((Node *)a->e1);
-    char *op = token_tostring(a->base.base.tok);
-    char *s2 = a->e2->base.base.tostring((Node *)a->e2);
-
-    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
-    char *buf = malloc(len);
-
-    snprintf(buf, len, "%s %s %s", s1, op, s2);
-    return buf;
-}
-
-/* ============================================================
- *                        Break
- * ============================================================ */
-
-static void break_gen(Node *self);
-
-Break *break_new()
-{
-    Break *b = malloc(sizeof(Break));
-
-    if (Stmt_Enclosing == Stmt_Null)
-        error("unenclosed break");
-
-    b->stmt = Stmt_Enclosing;
-
-    b->base.base.gen = break_gen;
-
-    return b;
-}
-
-static void break_gen(Node *self)
-{
-    Break *b = (Break *)self;
-
-    char buf[64];
-    snprintf(buf, sizeof(buf), "goto L%d", b->stmt->after);
-    emit(buf);
-}
-
-/* ============================================================
- *                        Constant
- * ============================================================ */
-
-static void constant_jumping(Node *self, int t, int f);
-
-Constant *constant_new(Token *tok, Type *type)
-{
-    Constant *c = malloc(sizeof(Constant));
-
-    c->base.tok  = tok;
-    c->base.type = type;
-
-    c->base.base.jumping = constant_jumping;
-
-    return c;
-}
-
-Constant *constant_int(int value)
-{
-    return constant_new(token_num(value), Type_Int);
-}
-
-/* 初始化静态常量 */
-__attribute__((constructor))
-static void init_constants()
-{
-    Constant_true  = constant_new(Word_true(),  Type_Bool);
-    Constant_false = constant_new(Word_false(), Type_Bool);
-}
-
-static void constant_jumping(Node *self, int t, int f)
-{
-    Constant *c = (Constant *)self;
-
-    if (c == Constant_true && t != 0) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "goto L%d", t);
-        emit(buf);
-    }
-    else if (c == Constant_false && f != 0) {
-        char buf[32];
-        snprintf(buf, sizeof(buf), "goto L%d", f);
-        emit(buf);
-    }
-}/* ============================================================
- *                        Do
- * ============================================================ */
-
-static void do_gen(Node *self, int b, int a);
-
-Do *do_new()
-{
-    Do *d = malloc(sizeof(Do));
-
-    d->stmt = NULL;
-    d->expr = NULL;
-
-    /* 设置虚函数 */
-    d->base.base.gen = do_gen;
-
-    return d;
-}
-
-void do_init(Do *d, Stmt *s, Expr *x)
-{
-    d->stmt = s;
-    d->expr = x;
-
-    /* if (mExpr.mType != Type.Bool) error("boolean required in a while"); */
-    if (x->type != Type_Bool)
-        error("boolean required in a while");
-}
-
-static void do_gen(Node *self, int b, int a)
-{
-    Do *d = (Do *)self;
-
-    /* after = a */
-    d->base.after = a;
-
-    /* int label = newlabel(); */
-    int label = newlabel();
-
-    /* mStmt.gen(b, label); */
-    d->stmt->base.gen((Node *)d->stmt, b, label);
-
-    /* emitlabel(label); */
-    emitlabel(label);
-
-    /* mExpr.jumping(b, 0); */
-    d->expr->base.base.jumping((Node *)d->expr, b, 0);
-}
-
-static void else_gen(Node *self, int b, int a);
-
-Else *else_new(Expr *expr, Stmt *stmt1, Stmt *stmt2)
-{
-    Else *e = malloc(sizeof(Else));
-
-    e->expr  = expr;
-    e->stmt1 = stmt1;
-    e->stmt2 = stmt2;
-
-    if (expr->type != Type_Bool)
-        error("boolean required in if");
-
-    e->base.base.gen = else_gen;
-
-    return e;
-}
-
-static void else_gen(Node *self, int b, int a)
-{
-    Else *e = (Else *)self;
-
-    int label1 = newlabel();
-    int label2 = newlabel();
-
-    e->expr->base.base.jumping((Node *)e->expr, 0, label2);
-
-    emitlabel(label1);
-    e->stmt1->base.gen((Node *)e->stmt1, label1, a);
-    emit("goto L%d", a);
-
-    emitlabel(label2);
-    e->stmt2->base.gen((Node *)e->stmt2, label2, a);
-}
-
-
-static Node *expr_gen(Node *self);
-static Node *expr_reduce(Node *self);
-static void expr_jumping(Node *self, int t, int f);
-static char *expr_tostring(Node *self);
-
-Expr *expr_new(Token *tok, Type *type)
-{
-    Expr *e = malloc(sizeof(Expr));
-    e->op = tok;
-    e->type = type;
-    e->base.gen = expr_gen;
-    e->base.reduce = expr_reduce;
-    e->base.jumping = expr_jumping;
-    e->base.tostring = expr_tostring;
-    return e;
-}
-
-static Node *expr_gen(Node *self)
-{
-    return self;
-}
-
-static Node *expr_reduce(Node *self)
-{
-    return self;
-}
-
-static void expr_jumping(Node *self, int t, int f)
-{
-    char *s = self->tostring(self);
-    if (t != 0 && f != 0) {
-        emit("if %s goto L%d", s, t);
-        emit("goto L%d", f);
-    } else if (t != 0) {
-        emit("if %s goto L%d", s, t);
-    } else if (f != 0) {
-        emit("iffalse %s goto L%d", s, f);
-    }
-}
-
-static char *expr_tostring(Node *self)
-{
-    Expr *e = (Expr *)self;
-    return token_tostring(e->op);
-}
-
-
-
-
-static void for_gen(Node *self, int b, int a);
-
-For *for_new(Stmt *init, Expr *cond, Stmt *step, Stmt *body)
-{
-    For *f = malloc(sizeof(For));
-
-    f->init = init;
-    f->cond = cond;
-    f->step = step;
-    f->body = body;
-
-    if (cond && cond->type != Type_Bool)
-        error("boolean required in for");
-
-    f->base.base.gen = for_gen;
-
-    return f;
-}
-
-static void for_gen(Node *self, int b, int a)
-{
-    For *f = (For *)self;
-
-    if (f->init)
-        f->init->base.gen((Node *)f->init, b, a);
-
-    int begin = newlabel();
-    int step  = newlabel();
-
-    emitlabel(begin);
-
-    if (f->cond)
-        f->cond->base.base.jumping((Node *)f->cond, 0, a);
-
-    f->body->base.gen((Node *)f->body, begin, step);
-
-    emitlabel(step);
-
-    if (f->step)
-        f->step->base.gen((Node *)f->step, begin, a);
-
-    emit("goto L%d", begin);
-}
-
-
-
-Id *id_new(Token *word, Type *type, int offset)
-{
-    Id *i = malloc(sizeof(Id));
-    i->base.op   = word;
-    i->base.type = type;
-    i->offset    = offset;
-
-    i->base.base.gen      = NULL;
-    i->base.base.reduce   = NULL;
-    i->base.base.jumping  = NULL;
-    i->base.base.tostring = NULL;
-
-    return i;
-}
-
-
-
-
-static void if_gen(Node *self, int b, int a);
-
-If *if_new(Expr *expr, Stmt *stmt)
-{
-    If *i = malloc(sizeof(If));
-
-    i->expr = expr;
-    i->stmt = stmt;
-
-    if (expr->type != Type_Bool)
-        error("boolean required in if");
-
-    i->base.base.gen = if_gen;
-
-    return i;
-}
-
-static void if_gen(Node *self, int b, int a)
-{
-    If *i = (If *)self;
-
-    int label = newlabel();
-
-    i->expr->base.base.jumping((Node *)i->expr, 0, a);
-
-    emitlabel(label);
-
-    i->stmt->base.gen((Node *)i->stmt, label, a);
-}
-
-
-
-
-static Node *logical_gen(Node *self);
-static char *logical_tostring(Node *self);
-
-Logical *logical_new(Token *tok, Expr *e1, Expr *e2)
-{
-    Logical *l = malloc(sizeof(Logical));
-
-    l->base.op   = tok;
-    l->base.type = NULL;
-
-    l->e1 = e1;
-    l->e2 = e2;
-
-    if (e1->type == Type_Bool && e2->type == Type_Bool)
-        l->base.type = Type_Bool;
-    else
-        error("type error");
-
-    l->base.base.gen      = logical_gen;
-    l->base.base.tostring = logical_tostring;
-
-    return l;
-}
-
-static Node *logical_gen(Node *self)
-{
-    Logical *l = (Logical *)self;
-
-    int f = newlabel();
-    int a = newlabel();
-
-    Temp *t = temp_new(l->base.type);
-
-    self->jumping(self, 0, f);
-
-    emit("%s = true", t->base.base.tostring((Node *)t));
-    emit("goto L%d", a);
-
-    emitlabel(f);
-
-    emit("%s = false", t->base.base.tostring((Node *)t));
-
-    emitlabel(a);
-
-    return (Node *)t;
-}
-
-static char *logical_tostring(Node *self)
-{
-    Logical *l = (Logical *)self;
-
-    char *s1 = l->e1->base.base.tostring((Node *)l->e1);
-    char *op = token_tostring(l->base.op);
-    char *s2 = l->e2->base.base.tostring((Node *)l->e2);
-
-    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
-    char *buf = malloc(len);
-
-    snprintf(buf, len, "%s %s %s", s1, op, s2);
-    return buf;
-}
-
-
-
-static int labels = 0;
-
-Node *node_new()
-{
-    Node *n = malloc(sizeof(Node));
-    n->lexline = Lexer_line;
-    n->gen = NULL;
-    n->jumping = NULL;
+    struct Node *n = malloc(sizeof(struct Node));
+    n->lexline  = 0;
+    n->gen      = NULL;
+    n->jumping  = NULL;
     n->tostring = NULL;
     return n;
 }
 
-void node_error(Node *self, const char *msg)
+void node_error(struct Node *self, const char *msg)
 {
-    fprintf(stderr, "near line %d: %s\n", self->lexline, msg);
+    fprintf(stderr, "near line %d: %s\n",
+            self ? self->lexline : -1, msg);
     exit(1);
 }
 
-int node_newlabel()
+int node_newlabel(void)
 {
-    return ++labels;
+    return ++g_labels;
 }
 
 void node_emitlabel(int i)
 {
-    printf("L%d:", i);
+    printf("L%d:\n", i);
 }
 
 void node_emit(const char *fmt, ...)
@@ -581,387 +101,770 @@ void node_emit(const char *fmt, ...)
     va_end(ap);
 }
 
-
-
-
-static void not_jumping(Node *self, int t, int f);
-static char *not_tostring(Node *self);
-
-Not *not_new(Token *tok, Expr *x2)
+static void node_emit_jumps(const char *test, int t, int f)
 {
-    Not *n = malloc(sizeof(Not));
+    if (t != 0 && f != 0) {
+        node_emit("if %s goto L%d", test, t);
+        node_emit("goto L%d", f);
+    } else if (t != 0) {
+        node_emit("if %s goto L%d", test, t);
+    } else if (f != 0) {
+        node_emit("iffalse %s goto L%d", test, f);
+    }
+}
+
+/* ============================================================
+ *  Expr
+ * ============================================================ */
+
+static struct Node *expr_gen(struct Node *self);
+static void         expr_jumping(struct Node *self, int t, int f);
+static char        *expr_tostring(struct Node *self);
+
+struct Expr *expr_new(struct lexer_token *tok, struct Type *type)
+{
+    struct Expr *e = malloc(sizeof(struct Expr));
+    e->op   = tok;
+    e->type = type;
+
+    e->base.gen      = expr_gen;
+    e->base.jumping  = expr_jumping;
+    e->base.tostring = expr_tostring;
+
+    return e;
+}
+
+static struct Node *expr_gen(struct Node *self)
+{
+    return self;
+}
+
+static void expr_jumping(struct Node *self, int t, int f)
+{
+    char *s = self->tostring(self);
+    node_emit_jumps(s, t, f);
+}
+
+static char *expr_tostring(struct Node *self)
+{
+    struct Expr *e = (struct Expr *)self;
+    return token_to_string(e->op);
+}
+
+/* ============================================================
+ *  Stmt
+ * ============================================================ */
+
+struct Stmt *Stmt_Null      = NULL;
+struct Stmt *Stmt_Enclosing = NULL;
+
+struct Stmt *stmt_new(void)
+{
+    struct Stmt *s = malloc(sizeof(struct Stmt));
+    s->after = 0;
+    s->base.gen      = NULL;
+    s->base.jumping  = NULL;
+    s->base.tostring = NULL;
+    return s;
+}
+
+__attribute__((constructor))
+static void init_stmt_singletons(void)
+{
+    Stmt_Null      = stmt_new();
+    Stmt_Enclosing = Stmt_Null;
+}
+
+/* ============================================================
+ *  Constant
+ * ============================================================ */
+
+struct Constant *Constant_true  = NULL;
+struct Constant *Constant_false = NULL;
+
+static char *constant_tostring(struct Node *self);
+static void  constant_jumping(struct Node *self, int t, int f);
+
+struct Constant *constant_new(struct lexer_token *tok, struct Type *type)
+{
+    struct Constant *c = malloc(sizeof(struct Constant));
+
+    c->base.op   = tok;
+    c->base.type = type;
+
+    c->base.base.gen      = expr_gen;
+    c->base.base.jumping  = constant_jumping;
+    c->base.base.tostring = constant_tostring;
+
+    return c;
+}
+
+struct Constant *constant_int(int value)
+{
+    struct lexer_token *tok = malloc(sizeof(struct lexer_token));
+    tok->tag     = NUM;
+    tok->int_val = value;
+    tok->lexeme  = NULL;
+    return constant_new(tok, Type_Int);
+}
+
+__attribute__((constructor))
+static void init_constant_singletons(void)
+{
+    static struct lexer_token tok_true  = { TRUE,  0, .lexeme = "true" };
+    static struct lexer_token tok_false = { FALSE, 0, .lexeme = "false" };
+
+    Constant_true  = constant_new(&tok_true,  Type_Bool);
+    Constant_false = constant_new(&tok_false, Type_Bool);
+}
+
+static char *constant_tostring(struct Node *self)
+{
+    struct Constant *c = (struct Constant *)self;
+    return token_to_string(c->base.op);
+}
+
+static void constant_jumping(struct Node *self, int t, int f)
+{
+    struct Constant *c = (struct Constant *)self;
+
+    if (c == Constant_true && t != 0) {
+        node_emit("goto L%d", t);
+    } else if (c == Constant_false && f != 0) {
+        node_emit("goto L%d", f);
+    } else {
+        char *s = self->tostring(self);
+        node_emit_jumps(s, t, f);
+    }
+}
+
+/* ============================================================
+ *  Op
+ * ============================================================ */
+
+static char *op_tostring(struct Node *self);
+
+struct Op *op_new(struct lexer_token *tok, struct Type *type)
+{
+    struct Op *o = malloc(sizeof(struct Op));
+    o->base.op   = tok;
+    o->base.type = type;
+
+    o->base.base.gen      = expr_gen;
+    o->base.base.jumping  = expr_jumping;
+    o->base.base.tostring = op_tostring;
+
+    return o;
+}
+
+static char *op_tostring(struct Node *self)
+{
+    struct Op *o = (struct Op *)self;
+    return token_to_string(o->base.op);
+}
+
+/* ============================================================
+ *  Arith
+ * ============================================================ */
+
+static char *arith_tostring(struct Node *self);
+
+struct Arith *arith_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
+{
+    struct Arith *a = malloc(sizeof(struct Arith));
+
+    a->base.base.op   = tok;
+    a->base.base.type = type_max(e1->type, e2->type);
+
+    if (!a->base.base.type)
+        node_error((struct Node *)a, "type error");
+
+    a->e1 = e1;
+    a->e2 = e2;
+
+    a->base.base.base.gen      = expr_gen;
+    a->base.base.base.jumping  = expr_jumping;
+    a->base.base.base.tostring = arith_tostring;
+
+    return a;
+}
+
+static char *arith_tostring(struct Node *self)
+{
+    struct Arith *a = (struct Arith *)self;
+
+    char *s1 = a->e1->base.tostring((struct Node *)a->e1);
+    char *s2 = a->e2->base.tostring((struct Node *)a->e2);
+    char *op = token_to_string(a->base.base.op);
+
+    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s %s %s", s1, op, s2);
+    return buf;
+}
+
+/* ============================================================
+ *  Logical（基类）
+ * ============================================================ */
+
+static char *logical_tostring(struct Node *self);
+
+struct Logical *logical_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
+{
+    struct Logical *l = malloc(sizeof(struct Logical));
+
+    l->base.op   = tok;
+    l->base.type = Type_Bool;
+
+    l->e1 = e1;
+    l->e2 = e2;
+
+    l->base.base.gen      = expr_gen;
+    l->base.base.jumping  = expr_jumping;
+    l->base.base.tostring = logical_tostring;
+
+    return l;
+}
+
+static char *logical_tostring(struct Node *self)
+{
+    struct Logical *l = (struct Logical *)self;
+
+    char *s1 = l->e1->base.tostring((struct Node *)l->e1);
+    char *s2 = l->e2->base.tostring((struct Node *)l->e2);
+    char *op = token_to_string(l->base.op);
+
+    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s %s %s", s1, op, s2);
+    return buf;
+}
+
+/* ============================================================
+ *  And
+ * ============================================================ */
+
+static void and_jumping(struct Node *self, int t, int f);
+
+struct And *and_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
+{
+    struct And *a = malloc(sizeof(struct And));
+
+    a->base.base.op   = tok;
+    a->base.base.type = Type_Bool;
+
+    a->base.e1 = e1;
+    a->base.e2 = e2;
+
+    a->base.base.base.gen      = expr_gen;
+    a->base.base.base.tostring = logical_tostring;
+    a->base.base.base.jumping  = and_jumping;
+
+    return a;
+}
+
+static void and_jumping(struct Node *self, int t, int f)
+{
+    struct And *a = (struct And *)self;
+
+    int label = (f != 0) ? f : node_newlabel();
+
+    a->base.e1->base.jumping((struct Node *)a->base.e1, 0, label);
+    a->base.e2->base.jumping((struct Node *)a->base.e2, t, f);
+
+    if (f == 0)
+        node_emitlabel(label);
+}
+
+/* ============================================================
+ *  Or
+ * ============================================================ */
+
+static void or_jumping(struct Node *self, int t, int f);
+
+struct Or *or_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
+{
+    struct Or *o = malloc(sizeof(struct Or));
+
+    o->base.base.op   = tok;
+    o->base.base.type = Type_Bool;
+
+    o->base.e1 = e1;
+    o->base.e2 = e2;
+
+    o->base.base.base.gen      = expr_gen;
+    o->base.base.base.tostring = logical_tostring;
+    o->base.base.base.jumping  = or_jumping;
+
+    return o;
+}
+
+static void or_jumping(struct Node *self, int t, int f)
+{
+    struct Or *o = (struct Or *)self;
+
+    int label = (t != 0) ? t : node_newlabel();
+
+    o->base.e1->base.jumping((struct Node *)o->base.e1, label, 0);
+    o->base.e2->base.jumping((struct Node *)o->base.e2, t, f);
+
+    if (t == 0)
+        node_emitlabel(label);
+}
+
+/* ============================================================
+ *  Not
+ * ============================================================ */
+
+static void  not_jumping(struct Node *self, int t, int f);
+static char *not_tostring(struct Node *self);
+
+struct Not *not_new(struct lexer_token *tok, struct Expr *x)
+{
+    struct Not *n = malloc(sizeof(struct Not));
 
     n->base.base.op   = tok;
     n->base.base.type = Type_Bool;
 
-    n->base.e1 = x2;
-    n->base.e2 = x2;
+    n->base.e1 = x;
+    n->base.e2 = x;
 
+    n->base.base.base.gen      = expr_gen;
     n->base.base.base.jumping  = not_jumping;
     n->base.base.base.tostring = not_tostring;
 
     return n;
 }
 
-static void not_jumping(Node *self, int t, int f)
+static void not_jumping(struct Node *self, int t, int f)
 {
-    Not *n = (Not *)self;
-    n->base.e2->base.base.jumping((Node *)n->base.e2, f, t);
+    struct Not *n = (struct Not *)self;
+    n->base.e1->base.jumping((struct Node *)n->base.e1, f, t);
 }
 
-static char *not_tostring(Node *self)
+static char *not_tostring(struct Node *self)
 {
-    Not *n = (Not *)self;
+    struct Not *n = (struct Not *)self;
 
-    char *op = token_tostring(n->base.base.op);
-    char *s2 = n->base.e2->base.base.tostring((Node *)n->base.e2);
+    char *op = token_to_string(n->base.base.op);
+    char *s  = n->base.e1->base.tostring((struct Node *)n->base.e1);
 
-    size_t len = strlen(op) + strlen(s2) + 5;
+    size_t len = strlen(op) + strlen(s) + 5;
     char *buf = malloc(len);
-
-    snprintf(buf, len, "%s %s", op, s2);
+    snprintf(buf, len, "%s %s", op, s);
     return buf;
 }
 
+/* ============================================================
+ *  Rel
+ * ============================================================ */
 
+static void rel_jumping(struct Node *self, int t, int f);
 
-static Node *op_reduce(Node *self);
-
-Op *op_new(Token *tok, Type *type)
+struct Rel *rel_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
 {
-    Op *o = malloc(sizeof(Op));
-
-    o->base.op   = tok;
-    o->base.type = type;
-
-    o->base.base.reduce = op_reduce;
-
-    return o;
-}
-
-static Node *op_reduce(Node *self)
-{
-    Expr *expr = (Expr *)self;
-
-    Node *g = expr->base.gen((Node *)expr);
-
-    Temp *t = temp_new(expr->type);
-
-    emit("%s = %s",
-         t->base.base.tostring((Node *)t),
-         g->tostring(g));
-
-    return (Node *)t;
-}
-
-
-
-
-static void or_jumping(Node *self, int t, int f);
-
-Or *or_new(Token *tok, Expr *x1, Expr *x2)
-{
-    Or *o = malloc(sizeof(Or));
-
-    o->base.base.op   = tok;
-    o->base.base.type = Type_Bool;
-
-    o->base.e1 = x1;
-    o->base.e2 = x2;
-
-    o->base.base.base.jumping = or_jumping;
-
-    return o;
-}
-
-static void or_jumping(Node *self, int t, int f)
-{
-    Or *o = (Or *)self;
-
-    int label = (t != 0) ? t : newlabel();
-
-    o->base.e1->base.base.jumping((Node *)o->base.e1, label, 0);
-    o->base.e2->base.base.jumping((Node *)o->base.e2, t, f);
-
-    if (t == 0)
-        emitlabel(label);
-}
-
-
-
-
-static void rel_jumping(Node *self, int t, int f);
-
-Rel *rel_new(Token *tok, Expr *x1, Expr *x2)
-{
-    Rel *r = malloc(sizeof(Rel));
+    struct Rel *r = malloc(sizeof(struct Rel));
 
     r->base.base.op   = tok;
     r->base.base.type = Type_Bool;
 
-    r->base.e1 = x1;
-    r->base.e2 = x2;
+    r->base.e1 = e1;
+    r->base.e2 = e2;
 
-    r->base.base.base.jumping = rel_jumping;
+    r->base.base.base.gen      = expr_gen;
+    r->base.base.base.tostring = logical_tostring;
+    r->base.base.base.jumping  = rel_jumping;
 
     return r;
 }
 
-static void rel_jumping(Node *self, int t, int f)
+static void rel_jumping(struct Node *self, int t, int f)
 {
-    Rel *r = (Rel *)self;
+    struct Rel *r = (struct Rel *)self;
 
-    Expr *a = (Expr *)r->base.e1->base.base.reduce((Node *)r->base.e1);
-    Expr *b = (Expr *)r->base.e2->base.base.reduce((Node *)r->base.e2);
+    char *s1 = r->base.e1->base.tostring((struct Node *)r->base.e1);
+    char *s2 = r->base.e2->base.tostring((struct Node *)r->base.e2);
+    char *op = token_to_string(r->base.base.op);
 
-    char *sa = a->base.base.tostring((Node *)a);
-    char *op = token_tostring(r->base.base.op);
-    char *sb = b->base.base.tostring((Node *)b);
-
-    size_t len = strlen(sa) + strlen(op) + strlen(sb) + 5;
+    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 5;
     char *test = malloc(len);
-    snprintf(test, len, "%s %s %s", sa, op, sb);
+    snprintf(test, len, "%s %s %s", s1, op, s2);
 
-    emitJumps(test, t, f);
+    node_emit_jumps(test, t, f);
 }
 
+/* ============================================================
+ *  Access
+ * ============================================================ */
 
-static void seq_gen(Node *self, int b, int a);
+static char *access_tostring(struct Node *self);
 
-Seq *seq_new(Stmt *s1, Stmt *s2)
+struct Access *access_new(struct Expr *array, struct Expr *index, struct Type *type)
 {
-    Seq *s = malloc(sizeof(Seq));
+    struct Access *a = malloc(sizeof(struct Access));
+
+    a->base.base.op   = NULL;
+    a->base.base.type = type;
+
+    a->array = array;
+    a->index = index;
+
+    a->base.base.base.gen      = expr_gen;
+    a->base.base.base.jumping  = expr_jumping;
+    a->base.base.base.tostring = access_tostring;
+
+    return a;
+}
+
+static char *access_tostring(struct Node *self)
+{
+    struct Access *a = (struct Access *)self;
+
+    char *arr = a->array->base.tostring((struct Node *)a->array);
+    char *idx = a->index->base.tostring((struct Node *)a->index);
+
+    size_t len = strlen(arr) + strlen(idx) + 10;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s [ %s ]", arr, idx);
+    return buf;
+}
+
+/* ============================================================
+ *  Id
+ * ============================================================ */
+
+static char *id_tostring(struct Node *self);
+
+struct Id *id_new(struct lexer_token *tok, struct Type *type, int offset)
+{
+    struct Id *i = malloc(sizeof(struct Id));
+
+    i->base.op   = tok;
+    i->base.type = type;
+    i->offset    = offset;
+
+    i->base.base.gen      = expr_gen;
+    i->base.base.jumping  = expr_jumping;
+    i->base.base.tostring = id_tostring;
+
+    return i;
+}
+
+static char *id_tostring(struct Node *self)
+{
+    struct Id *i = (struct Id *)self;
+    return token_to_string(i->base.op);
+}
+
+/* ============================================================
+ *  Seq
+ * ============================================================ */
+
+static void seq_gen(struct Node *self, int b, int a);
+
+struct Seq *seq_new(struct Stmt *s1, struct Stmt *s2)
+{
+    struct Seq *s = malloc(sizeof(struct Seq));
     s->s1 = s1;
     s->s2 = s2;
     s->base.base.gen = seq_gen;
     return s;
 }
 
-static void seq_gen(Node *self, int b, int a)
+static void seq_gen(struct Node *self, int b, int a)
 {
-    Seq *s = (Seq *)self;
+    struct Seq *s = (struct Seq *)self;
 
     if (s->s1 == Stmt_Null)
-        s->s2->base.gen((Node *)s->s2, b, a);
+        s->s2->base.gen((struct Node *)s->s2, b, a);
     else if (s->s2 == Stmt_Null)
-        s->s1->base.gen((Node *)s->s1, b, a);
+        s->s1->base.gen((struct Node *)s->s1, b, a);
     else {
         int label = node_newlabel();
-        s->s1->base.gen((Node *)s->s1, b, label);
+        s->s1->base.gen((struct Node *)s->s1, b, label);
         node_emitlabel(label);
-        s->s2->base.gen((Node *)s->s2, label, a);
+        s->s2->base.gen((struct Node *)s->s2, label, a);
     }
 }
 
+/* ============================================================
+ *  If
+ * ============================================================ */
 
-static void set_gen(Node *self, int b, int a);
+static void if_gen(struct Node *self, int b, int a);
 
-static Type *set_check(Type *p1, Type *p2)
+struct If *if_new(struct Expr *expr, struct Stmt *stmt)
 {
-    if (type_numeric(p1) && type_numeric(p2)) return p2;
-    if (p1 == Type_Bool && p2 == Type_Bool) return p2;
-    return NULL;
+    struct If *i = malloc(sizeof(struct If));
+
+    i->expr = expr;
+    i->stmt = stmt;
+
+    i->base.base.gen = if_gen;
+
+    return i;
 }
 
-Set *set_new(Id *id, Expr *expr)
+static void if_gen(struct Node *self, int b, int a)
 {
-    Set *s = malloc(sizeof(Set));
+    struct If *i = (struct If *)self;
 
-    s->id   = id;
-    s->expr = expr;
+    int label = node_newlabel();
 
-    if (set_check(id->base.type, expr->type) == NULL)
-        node_error((Node *)s, "type error");
-
-    s->base.base.gen = set_gen;
-
-    return s;
+    i->expr->base.jumping((struct Node *)i->expr, 0, a);
+    node_emitlabel(label);
+    i->stmt->base.gen((struct Node *)i->stmt, label, a);
 }
 
-static void set_gen(Node *self, int b, int a)
+/* ============================================================
+ *  Else
+ * ============================================================ */
+
+static void else_gen(struct Node *self, int b, int a);
+
+struct Else *else_new(struct Expr *expr, struct Stmt *s1, struct Stmt *s2)
 {
-    Set *s = (Set *)self;
+    struct Else *e = malloc(sizeof(struct Else));
 
-    Expr *g = (Expr *)s->expr->base.base.gen((Node *)s->expr);
+    e->expr  = expr;
+    e->stmt1 = s1;
+    e->stmt2 = s2;
 
-    char *lhs = s->id->base.base.tostring((Node *)s->id);
-    char *rhs = g->base.base.tostring((Node *)g);
+    e->base.base.gen = else_gen;
 
-    node_emit("%s = %s", lhs, rhs);
+    return e;
 }
 
-
-
-static void setelem_gen(Node *self, int b, int a);
-
-static Type *setelem_check(Type *p1, Type *p2)
+static void else_gen(struct Node *self, int b, int a)
 {
-    if (type_is_array(p1) || type_is_array(p2)) return NULL;
-    if (p1 == p2) return p2;
-    if (type_numeric(p1) && type_numeric(p2)) return p2;
-    return NULL;
+    struct Else *e = (struct Else *)self;
+
+    int label1 = node_newlabel();
+    int label2 = node_newlabel();
+
+    e->expr->base.jumping((struct Node *)e->expr, 0, label2);
+
+    node_emitlabel(label1);
+    e->stmt1->base.gen((struct Node *)e->stmt1, label1, a);
+    node_emit("goto L%d", a);
+
+    node_emitlabel(label2);
+    e->stmt2->base.gen((struct Node *)e->stmt2, label2, a);
 }
 
-SetElem *setelem_new(Access *x, Expr *y)
+/* ============================================================
+ *  While
+ * ============================================================ */
+
+static void while_gen(struct Node *self, int b, int a);
+
+struct While *while_new(void)
 {
-    SetElem *s = malloc(sizeof(SetElem));
-
-    s->array = x->array;
-    s->index = x->index;
-    s->expr  = y;
-
-    if (setelem_check(x->base.base.type, y->type) == NULL)
-        node_error((Node *)s, "type error");
-
-    s->base.base.gen = setelem_gen;
-
-    return s;
-}
-
-static void setelem_gen(Node *self, int b, int a)
-{
-    SetElem *s = (SetElem *)self;
-
-    Expr *i = (Expr *)s->index->base.base.reduce((Node *)s->index);
-    Expr *v = (Expr *)s->expr->base.base.reduce((Node *)s->expr);
-
-    char *si = i->base.base.tostring((Node *)i);
-    char *sv = v->base.base.tostring((Node *)v);
-    char *arr = s->array->base.base.tostring((Node *)s->array);
-
-    node_emit("%s [ %s ] = %s", arr, si, sv);
-}
-
-
-
-Stmt *Stmt_Null = NULL;
-Stmt *Stmt_Enclosing = NULL;
-
-Stmt *stmt_new()
-{
-    Stmt *s = malloc(sizeof(Stmt));
-    s->after = 0;
-    s->base.gen = NULL;
-    s->base.jumping = NULL;
-    s->base.tostring = NULL;
-    return s;
-}
-
-__attribute__((constructor))
-static void init_stmt_singletons()
-{
-    Stmt_Null = stmt_new();
-    Stmt_Enclosing = Stmt_Null;
-}
-
-
-
-static int temp_count = 0;
-
-static char *temp_tostring(Node *self)
-{
-    Temp *t = (Temp *)self;
-    char *buf = malloc(32);
-    snprintf(buf, 32, "t%d", t->number);
-    return buf;
-}
-
-Temp *temp_new(Type *type)
-{
-    Temp *t = malloc(sizeof(Temp));
-
-    t->base.op   = Word_temp();
-    t->base.type = type;
-
-    t->number = temp_count++;
-
-    t->base.base.tostring = temp_tostring;
-
-    return t;
-}
-
-
-
-static Node *unary_gen(Node *self);
-static char *unary_tostring(Node *self);
-
-Unary *unary_new(Token *tok, Expr *expr)
-{
-    Unary *u = malloc(sizeof(Unary));
-
-    u->base.base.op   = tok;
-    u->base.base.type = type_max(Type_Int, expr->type);
-
-    if (!u->base.base.type)
-        node_error((Node *)u, "type error");
-
-    u->expr = expr;
-
-    u->base.base.base.gen      = unary_gen;
-    u->base.base.base.tostring = unary_tostring;
-
-    return u;
-}
-
-static Node *unary_gen(Node *self)
-{
-    Unary *u = (Unary *)self;
-
-    Expr *r = (Expr *)u->expr->base.base.reduce((Node *)u->expr);
-
-    return (Node *)unary_new(u->base.base.op, r);
-}
-
-static char *unary_tostring(Node *self)
-{
-    Unary *u = (Unary *)self;
-
-    char *op = token_tostring(u->base.base.op);
-    char *s  = u->expr->base.base.tostring((Node *)u->expr);
-
-    size_t len = strlen(op) + strlen(s) + 5;
-    char *buf = malloc(len);
-
-    snprintf(buf, len, "%s %s", op, s);
-    return buf;
-}
-
-
-
-static void while_gen(Node *self, int b, int a);
-
-While *while_new()
-{
-    While *w = malloc(sizeof(While));
+    struct While *w = malloc(sizeof(struct While));
     w->expr = NULL;
     w->stmt = NULL;
     w->base.base.gen = while_gen;
     return w;
 }
 
-void while_init(While *w, Expr *expr, Stmt *stmt)
+void while_init(struct While *w, struct Expr *expr, struct Stmt *stmt)
 {
     w->expr = expr;
     w->stmt = stmt;
-
-    if (expr->type != Type_Bool)
-        node_error((Node *)w, "boolean required in a while");
 }
 
-static void while_gen(Node *self, int b, int a)
+static void while_gen(struct Node *self, int b, int a)
 {
-    While *w = (While *)self;
+    struct While *w = (struct While *)self;
 
     w->base.after = a;
-
-    w->expr->base.base.jumping((Node *)w->expr, 0, a);
 
     int label = node_newlabel();
     node_emitlabel(label);
 
-    w->stmt->base.gen((Node *)w->stmt, label, b);
+    w->expr->base.jumping((struct Node *)w->expr, 0, a);
+    w->stmt->base.gen((struct Node *)w->stmt, label, a);
 
-    node_emit("goto L%d", b);
+    node_emit("goto L%d", label);
 }
 
+/* ============================================================
+ *  Do
+ * ============================================================ */
 
+static void do_gen(struct Node *self, int b, int a);
+
+struct Do *do_new(void)
+{
+    struct Do *d = malloc(sizeof(struct Do));
+    d->stmt = NULL;
+    d->expr = NULL;
+    d->base.base.gen = do_gen;
+    return d;
+}
+
+void do_init(struct Do *d, struct Stmt *s, struct Expr *x)
+{
+    d->stmt = s;
+    d->expr = x;
+}
+
+static void do_gen(struct Node *self, int b, int a)
+{
+    struct Do *d = (struct Do *)self;
+
+    d->base.after = a;
+
+    int label = node_newlabel();
+    node_emitlabel(label);
+
+    d->stmt->base.gen((struct Node *)d->stmt, label, a);
+    d->expr->base.jumping((struct Node *)d->expr, label, 0);
+}
+
+/* ============================================================
+ *  Break
+ * ============================================================ */
+
+static void break_gen(struct Node *self, int b, int a);
+
+struct Break *break_new(void)
+{
+    struct Break *br = malloc(sizeof(struct Break));
+
+    if (Stmt_Enclosing == Stmt_Null)
+        node_error((struct Node *)br, "unenclosed break");
+
+    br->stmt = Stmt_Enclosing;
+    br->base.base.gen = break_gen;
+
+    return br;
+}
+
+static void break_gen(struct Node *self, int b, int a)
+{
+    struct Break *br = (struct Break *)self;
+    node_emit("goto L%d", br->stmt->after);
+}
+
+/* ============================================================
+ *  Set
+ * ============================================================ */
+
+static void set_gen(struct Node *self, int b, int a);
+
+struct Set *set_new(struct Id *id, struct Expr *expr)
+{
+    struct Set *s = malloc(sizeof(struct Set));
+
+    s->id   = id;
+    s->expr = expr;
+
+    s->base.base.gen = set_gen;
+
+    return s;
+}
+
+static void set_gen(struct Node *self, int b, int a)
+{
+    struct Set *s = (struct Set *)self;
+
+    char *lhs = s->id->base.base.tostring((struct Node *)s->id);
+    char *rhs = s->expr->base.tostring((struct Node *)s->expr);
+
+    node_emit("%s = %s", lhs, rhs);
+}
+
+/* ============================================================
+ *  SetElem
+ * ============================================================ */
+
+static void setelem_gen(struct Node *self, int b, int a);
+
+struct SetElem *setelem_new(struct Access *x, struct Expr *y)
+{
+    struct SetElem *s = malloc(sizeof(struct SetElem));
+
+    s->array = (struct Id *)x->array;
+    s->index = x->index;
+    s->expr  = y;
+
+    s->base.base.gen = setelem_gen;
+
+    return s;
+}
+
+static void setelem_gen(struct Node *self, int b, int a)
+{
+    struct SetElem *s = (struct SetElem *)self;
+
+    char *arr = s->array->base.base.tostring((struct Node *)s->array);
+    char *idx = s->index->base.tostring((struct Node *)s->index);
+    char *val = s->expr->base.tostring((struct Node *)s->expr);
+
+    node_emit("%s [ %s ] = %s", arr, idx, val);
+}
+
+/* ============================================================
+ *  Temp
+ * ============================================================ */
+
+static int temp_count = 0;
+
+static char *temp_tostring(struct Node *self)
+{
+    struct Temp *t = (struct Temp *)self;
+    char *buf = malloc(32);
+    snprintf(buf, 32, "t%d", t->number);
+    return buf;
+}
+
+struct Temp *temp_new(struct Type *type)
+{
+    struct Temp *t = malloc(sizeof(struct Temp));
+
+    t->base.op   = NULL;
+    t->base.type = type;
+    t->number    = temp_count++;
+
+    t->base.base.gen      = expr_gen;
+    t->base.base.jumping  = expr_jumping;
+    t->base.base.tostring = temp_tostring;
+
+    return t;
+}
+
+/* ============================================================
+ *  Unary
+ * ============================================================ */
+
+static char *unary_tostring(struct Node *self);
+
+struct Unary *unary_new(struct lexer_token *tok, struct Expr *expr)
+{
+    struct Unary *u = malloc(sizeof(struct Unary));
+
+    u->base.base.op   = tok;
+    u->base.base.type = type_max(Type_Int, expr->type);
+
+    u->expr = expr;
+
+    u->base.base.base.gen      = expr_gen;
+    u->base.base.base.jumping  = expr_jumping;
+    u->base.base.base.tostring = unary_tostring;
+
+    return u;
+}
+
+static char *unary_tostring(struct Node *self)
+{
+    struct Unary *u = (struct Unary *)self;
+
+    char *op = token_to_string(u->base.base.op);
+    char *s  = u->expr->base.tostring((struct Node *)u->expr);
+
+    size_t len = strlen(op) + strlen(s) + 5;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s %s", op, s);
+    return buf;
+}

@@ -2,6 +2,7 @@
 #define SYMBOLS_H
 
 #include "hashmap.h"
+struct Id;   // forward declaration
 
 enum type_tag {
     TYPE_INT,
