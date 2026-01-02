@@ -159,7 +159,7 @@ struct Expr *expr_new(struct lexer_token *tok, struct Type *type)
     e->op   = tok;
     e->type = type;
 
-    e->base.gen      = expr_gen;
+    e->base.gen      = (void *)expr_gen;
     e->base.jumping  = expr_jumping;
     e->base.tostring = expr_tostring;
 
@@ -224,7 +224,7 @@ struct Constant *constant_new(struct lexer_token *tok, struct Type *type)
     c->base.op   = tok;
     c->base.type = type;
 
-    c->base.base.gen      = expr_gen;
+    c->base.base.gen      = (void *)expr_gen;
     c->base.base.jumping  = constant_jumping;
     c->base.base.tostring = constant_tostring;
 
@@ -242,22 +242,20 @@ struct Constant *constant_int(int value)
 
 struct Constant *constant_float(float v)
 {
-    printf("constant_float: v = %f\n", v);
-
-    struct lexer_token *tok = calloc(1, sizeof(struct lexer_token));
+    struct lexer_token *tok = malloc(sizeof(struct lexer_token));
     tok->tag      = REAL;
     tok->real_val = v;
     tok->lexeme   = NULL;
 
     struct Constant *c = malloc(sizeof(struct Constant));
 
-    c->base.op   = tok;          // Expr.op
-    c->base.type = Type_Float;   // Expr.type
+    c->base.op   = tok;         
+    c->base.type = Type_Float;   
     c->real_val  = v;
 
-    c->base.base.gen      = expr_gen;          // Node.gen
-    c->base.base.jumping  = constant_jumping;  // Node.jumping
-    c->base.base.tostring = constant_tostring; // Node.tostring
+    c->base.base.gen      = (void *)expr_gen;         
+    c->base.base.jumping  = constant_jumping; 
+    c->base.base.tostring = constant_tostring; 
 
     return c;
 }
@@ -304,7 +302,7 @@ struct Op *op_new(struct lexer_token *tok, struct Type *type)
     o->base.op   = tok;
     o->base.type = type;
 
-    o->base.base.gen      = expr_gen;
+    o->base.base.gen      = (void *)expr_gen;
     o->base.base.jumping  = expr_jumping;
     o->base.base.tostring = op_tostring;
 
@@ -336,7 +334,7 @@ struct Arith *arith_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e
     a->e1 = e1;
     a->e2 = e2;
 
-    a->base.base.base.gen      = expr_gen;
+    a->base.base.base.gen      = (void *)expr_gen;
     a->base.base.base.jumping  = expr_jumping;
     a->base.base.base.tostring = arith_tostring;
 
@@ -373,7 +371,7 @@ struct Logical *logical_new(struct lexer_token *tok, struct Expr *e1, struct Exp
     l->e1 = e1;
     l->e2 = e2;
 
-    l->base.base.gen      = expr_gen;
+    l->base.base.gen      = (void *)expr_gen;
     l->base.base.jumping  = expr_jumping;
     l->base.base.tostring = logical_tostring;
 
@@ -410,7 +408,7 @@ struct And *and_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
     a->base.e1 = e1;
     a->base.e2 = e2;
 
-    a->base.base.base.gen      = expr_gen;
+    a->base.base.base.gen      = (void *)expr_gen;
     a->base.base.base.tostring = logical_tostring;
     a->base.base.base.jumping  = and_jumping;
 
@@ -446,7 +444,7 @@ struct Or *or_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
     o->base.e1 = e1;
     o->base.e2 = e2;
 
-    o->base.base.base.gen      = expr_gen;
+    o->base.base.base.gen      = (void *)expr_gen;
     o->base.base.base.tostring = logical_tostring;
     o->base.base.base.jumping  = or_jumping;
 
@@ -483,7 +481,7 @@ struct Not *not_new(struct lexer_token *tok, struct Expr *x)
     n->base.e1 = x;
     n->base.e2 = x;
 
-    n->base.base.base.gen      = expr_gen;
+    n->base.base.base.gen      = (void *)expr_gen;
     n->base.base.base.jumping  = not_jumping;
     n->base.base.base.tostring = not_tostring;
 
@@ -525,7 +523,7 @@ struct Rel *rel_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
     r->base.e1 = e1;
     r->base.e2 = e2;
 
-    r->base.base.base.gen      = expr_gen;
+    r->base.base.base.gen      = (void *)expr_gen;
     r->base.base.base.tostring = logical_tostring;
     r->base.base.base.jumping  = rel_jumping;
 
@@ -563,7 +561,7 @@ struct Access *access_new(struct Expr *array, struct Expr *index, struct Type *t
     a->array = array;
     a->index = index;
 
-    a->base.base.base.gen      = expr_gen;
+    a->base.base.base.gen      = (void *)expr_gen;
     a->base.base.base.jumping  = expr_jumping;
     a->base.base.base.tostring = access_tostring;
 
@@ -597,7 +595,7 @@ struct Id *id_new(struct lexer_token *tok, struct Type *type, int offset)
     i->base.type = type;
     i->offset    = offset;
 
-    i->base.base.gen      = expr_gen;
+    i->base.base.gen      = (void *)expr_gen;
     i->base.base.jumping  = expr_jumping;
     i->base.base.tostring = id_tostring;
 
@@ -881,7 +879,7 @@ struct Temp *temp_new(struct Type *type)
     t->base.type = type;
     t->number    = temp_count++;
 
-    t->base.base.gen      = expr_gen;
+    t->base.base.gen      = (void *)expr_gen;
     t->base.base.jumping  = expr_jumping;
     t->base.base.tostring = temp_tostring;
 
@@ -903,7 +901,7 @@ struct Unary *unary_new(struct lexer_token *tok, struct Expr *expr)
 
     u->expr = expr;
 
-    u->base.base.base.gen      = expr_gen;
+    u->base.base.base.gen      = (void *)expr_gen;
     u->base.base.base.jumping  = expr_jumping;
     u->base.base.base.tostring = unary_tostring;
 

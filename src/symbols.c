@@ -72,18 +72,18 @@ struct Env *env_new(struct Env *prev)
 
 void env_put_var(struct Env *env, const char *name, struct Id *id)
 {
-    hashmap_put(&env->vars, name, id);
+    hashmap_put(&env->vars, (void *)name, id);
 }
 
 void env_put_type(struct Env *env, const char *name, struct Type *type)
 {
-    hashmap_put(&env->types, name, type);
+    hashmap_put(&env->types, (void *)name, type);
 }
 
 struct Id *env_get_var(struct Env *env, const char *name)
 {
     for (; env; env = env->prev) {
-        struct Id *id = hashmap_get(&env->vars, name);
+        struct Id *id = hashmap_get(&env->vars, (void *)name);
         if (id) return id;
     }
     return NULL;
@@ -92,7 +92,7 @@ struct Id *env_get_var(struct Env *env, const char *name)
 struct Type *env_get_type(struct Env *env, const char *name)
 {
     for (; env; env = env->prev) {
-        struct Type *t = hashmap_get(&env->types, name);
+        struct Type *t = hashmap_get(&env->types, (void *)name);
         if (t) return t;
     }
     return NULL;
