@@ -8,13 +8,15 @@ set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -g -O0")
 
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/bpf/include
 )
 
 file(GLOB LIB_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.c")
+file(GLOB LIB_BPF_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/bpf/src/*.c")
 
 add_executable(littleCompiler  
     ${LIB_SOURCES}
-    ${LIB_SRC_SOURCES}
+    ${LIB_BPF_SOURCES}
 )
 
 add_custom_target(cleanup

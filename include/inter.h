@@ -90,6 +90,26 @@ struct Arith {
 
 struct Arith *arith_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
 
+/* ===== BitAnd ===== */
+
+struct BitAnd {
+    struct Op base;
+    struct Expr *e1;
+    struct Expr *e2;
+};
+
+struct BitAnd *bitand_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
+
+/* ===== BitOr ===== */
+
+struct BitOr {
+    struct Op base;
+    struct Expr *e1;
+    struct Expr *e2;
+};
+
+struct BitOr *bitor_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
+
 /* ===== Break ===== */
 
 struct Break {

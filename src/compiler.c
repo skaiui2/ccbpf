@@ -5,6 +5,7 @@
 #include<fcntl.h>
 #include "lexer.h"
 #include "parser.h"
+#include "ccbpf.h"
 
 int main(int argc, char **argv)
 {
@@ -23,8 +24,57 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* 这里会从 hello.c 读入、词法分析、语法分析并生成中间代码 */
     parser_program(p);
+
+    struct bpf_insn prog[] = {
+        // mem[0] = 10
+        { BPF_LD|BPF_IMM, 0,0,10 },
+        { BPF_ST,         0,0,0 },
+
+        // mem[1] = 20
+        { BPF_LD|BPF_IMM, 0,0,20 },
+        { BPF_ST,         0,0,1 },
+
+        // mem[2] = 30
+        { BPF_LD|BPF_IMM, 0,0,30 },
+        { BPF_ST,         0,0,2 },
+
+        // mem[3] = 40
+        { BPF_LD|BPF_IMM, 0,0,40 },
+        { BPF_ST,         0,0,3 },
+
+        // mem[4] = 50
+        { BPF_LD|BPF_IMM, 0,0,50 },
+        { BPF_ST,         0,0,4 },
+
+        // A = mem[0]
+        { BPF_LD|BPF_MEM, 0,0,0 },
+
+        // A += mem[1]
+        { BPF_LDX|BPF_MEM, 0,0,1 },
+        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
+
+        // A += mem[2]
+        { BPF_LDX|BPF_MEM, 0,0,2 },
+        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
+
+        // A += mem[3]
+        { BPF_LDX|BPF_MEM, 0,0,3 },
+        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
+
+        // A += mem[4]
+        { BPF_LDX|BPF_MEM, 0,0,4 },
+        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
+
+        // return A
+        { BPF_RET|BPF_A, 0,0,0 },
+    };
+
+    uint8_t dummy[1] = {0};
+
+    u_int result = bpf_filter(prog, dummy, sizeof(dummy), sizeof(dummy));
+
+    printf("BPF sum result: %u\n", result); // 预期：150
 
     return 0;
 }

@@ -55,6 +55,10 @@ static char *token_to_string(struct lexer_token *tok)
 
     // 显式处理所有运算符 / 关键符号
     switch (tok->tag) {
+    case AND_BIT:    return strdup("&");
+    case OR_BIT:     return strdup("|");
+    case LT:         return strdup("<");
+    case GT:         return strdup(">");
     case PLUS:       return strdup("+");
     case MINUS:      return strdup("-");
     case STAR:       return strdup("*");
@@ -348,6 +352,82 @@ static char *arith_tostring(struct Node *self)
     char *s1 = a->e1->base.tostring((struct Node *)a->e1);
     char *s2 = a->e2->base.tostring((struct Node *)a->e2);
     char *op = token_to_string(a->base.base.op);
+
+    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s %s %s", s1, op, s2);
+    return buf;
+}
+
+/* ============================================================
+ *  BitAnd
+ * ============================================================ */
+
+static char *bitand_tostring(struct Node *self);
+
+struct BitAnd *bitand_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
+{
+    struct BitAnd *b = malloc(sizeof(struct BitAnd)); 
+
+    b->base.base.op   = tok;
+    b->base.base.type = type_max(e1->type, e2->type);
+
+    if (!b->base.base.type)
+        node_error((struct Node *)b, "type error");
+
+    b->e1 = e1;
+    b->e2 = e2;
+
+    b->base.base.base.gen      = (void *)expr_gen;
+    b->base.base.base.jumping  = expr_jumping;
+    b->base.base.base.tostring = arith_tostring;
+
+    return b;
+}
+
+static char *bitand_tostring(struct Node *self)
+{
+    struct BitAnd *b = (struct BitAnd *)self;
+
+    char *s1 = b->e1->base.tostring((struct Node *)b->e1);
+    char *s2 = b->e2->base.tostring((struct Node *)b->e2);
+    char *op = token_to_string(b->base.base.op); 
+
+    size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s %s %s", s1, op, s2);
+    return buf;
+}
+
+static char *bitor_tostring(struct Node *self);
+
+struct BitOr *bitor_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
+{
+    struct BitOr *b = malloc(sizeof(struct BitOr));
+
+    b->base.base.op   = tok;
+    b->base.base.type = type_max(e1->type, e2->type);  
+
+    if (!b->base.base.type)
+        node_error((struct Node *)b, "type error");
+
+    b->e1 = e1;
+    b->e2 = e2;
+
+    b->base.base.base.gen      = (void *)expr_gen;    
+    b->base.base.base.jumping  = expr_jumping;      
+    b->base.base.base.tostring = bitor_tostring;     
+
+    return b;
+}
+
+static char *bitor_tostring(struct Node *self)
+{
+    struct BitOr *b = (struct BitOr *)self;
+
+    char *s1 = b->e1->base.tostring((struct Node *)b->e1);
+    char *s2 = b->e2->base.tostring((struct Node *)b->e2);
+    char *op = token_to_string(b->base.base.op);  
 
     size_t len = strlen(s1) + strlen(op) + strlen(s2) + 10;
     char *buf = malloc(len);

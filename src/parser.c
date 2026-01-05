@@ -46,6 +46,10 @@ static char *token_to_string(struct lexer_token *tok)
 
     // 显式处理所有运算符 / 关键符号
     switch (tok->tag) {
+    case AND_BIT:    return strdup("&");
+    case OR_BIT:     return strdup("|");
+    case LT:         return strdup("<");
+    case GT:         return strdup(">");
     case PLUS:       return strdup("+");
     case MINUS:      return strdup("-");
     case STAR:       return strdup("*");
@@ -298,9 +302,35 @@ struct Expr *parser_bool(struct Parser *p)
     return x;
 }
 
-struct Expr *parser_join(struct Parser *p)
+struct Expr *parser_bitor(struct Parser *p)
 {
     struct Expr *x = parser_rel(p);
+
+    while (p->look->tag == OR_BIT) {  
+        struct lexer_token *tok = p->look;
+        parser_move(p);
+        x = (struct Expr *)bitor_new(tok, x, parser_rel(p));
+    }
+
+    return x;
+}
+
+struct Expr *parser_bitand(struct Parser *p)
+{
+    struct Expr *x = parser_bitor(p);
+
+    while (p->look->tag == AND_BIT) {   
+        struct lexer_token *tok = p->look;
+        parser_move(p);
+        x = (struct Expr *)bitand_new(tok, x, parser_rel(p));
+    }
+
+    return x;
+}
+
+struct Expr *parser_join(struct Parser *p)
+{
+    struct Expr *x = parser_bitand(p);
     while (p->look->tag == AND) {
         struct lexer_token *tok = p->look;
         parser_move(p);
@@ -314,8 +344,8 @@ struct Expr *parser_rel(struct Parser *p)
     struct Expr *x = parser_expr(p);
 
     switch (p->look->tag) {
-    case '<':
-    case '>':
+    case LT:
+    case GT:
     case LE:
     case GE:
     case EQ:

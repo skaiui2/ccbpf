@@ -126,11 +126,11 @@ struct lexer_token *lexer_scan(struct lexer *lex)
     switch (lex->peek) {
         case '&':
             if (readch_match(lex, '&')) return new_lexer_token_char(AND, '&');
-            return new_lexer_token_char('&', '&');
+            return new_lexer_token_char(AND_BIT, '&');
 
         case '|':
             if (readch_match(lex, '|')) return new_lexer_token_char(OR, '|');
-            return new_lexer_token_char('|', '|');
+            return new_lexer_token_char(OR_BIT, '|');
         
         case '=':
             if (readch_match(lex, '=')) return new_lexer_token_char(EQ, '=');
@@ -142,11 +142,11 @@ struct lexer_token *lexer_scan(struct lexer *lex)
 
         case '<':
             if (readch_match(lex, '=')) return new_lexer_token_char(LE, '<');
-            return new_lexer_token_char('<', '<');
+            return new_lexer_token_char(LT, '<');
 
         case '>':
             if (readch_match(lex, '=')) return new_lexer_token_char(GE, '>');
-            return new_lexer_token_char('>', '>');
+            return new_lexer_token_char(GT, '>');
 
         case '(':
             readch(lex);

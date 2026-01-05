@@ -9,6 +9,10 @@ enum tag {
     BREAK,
     DO,
     ELSE,
+    AND_BIT,       // & 
+    OR_BIT,        // | 
+    LT,            // < 
+    GT,            // >
     EQ,            // ==
     FALSE,
     GE,            // >=

@@ -1,6 +1,8 @@
 {
     int i; int j; float v; float x; float[100] a;
     x = 3.14;
+    x = x & 1;
+    x = x | 1;
 
     while(true) {
         do i = i+1; while(a[i] < v);
