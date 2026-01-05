@@ -1,4 +1,5 @@
 #include "inter.h"
+#include "ir.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -11,6 +12,40 @@ static struct Type TYPE_BOOL_OBJ  = { TYPE_BOOL,  1 };
 struct Type *Type_Int   = &TYPE_INT_OBJ;
 struct Type *Type_Float = &TYPE_FLOAT_OBJ;
 struct Type *Type_Bool  = &TYPE_BOOL_OBJ;
+
+static int temp_count = 1;
+int new_temp(void) 
+{ 
+    return temp_count++; 
+}
+
+static inline int is_access(struct Node *n) {
+    return n->tag == TAG_ACCESS;
+}
+
+static inline int is_rel(struct Node *n) {
+    return n->tag == TAG_REL;
+}
+
+static inline int is_logical(struct Node *n) {
+    return n->tag == TAG_LOGICAL;
+}
+
+static inline int is_arith(struct Node *n) {
+    return n->tag == TAG_ARITH;
+}
+
+static inline int is_unary(struct Node *n) {
+    return n->tag == TAG_UNARY;
+}
+
+static inline int is_constant(struct Node *n) {
+    return n->tag == TAG_CONSTANT;
+}
+
+static inline int is_id(struct Node *n) {
+    return n->tag == TAG_ID;
+}
 
 /* ============================================================
  *  工具：类型提升
@@ -163,6 +198,8 @@ struct Expr *expr_new(struct lexer_token *tok, struct Type *type)
     e->op   = tok;
     e->type = type;
 
+    e->temp_no = 0;
+
     e->base.gen      = (void *)expr_gen;
     e->base.jumping  = expr_jumping;
     e->base.tostring = expr_tostring;
@@ -172,8 +209,98 @@ struct Expr *expr_new(struct lexer_token *tok, struct Type *type)
 
 static struct Node *expr_gen(struct Node *self)
 {
+    struct Expr *e = (struct Expr *)self;
+
+    if (e->temp_no == 0)
+        e->temp_no = new_temp();
+
+    if (is_access(self)) {
+        struct Access *acc = (struct Access *)self;
+
+        expr_gen((struct Node *)acc->index);
+
+        struct IR ir = {0};
+        ir.op          = IR_LOAD;
+        ir.dst         = e->temp_no;
+        ir.array_base  = acc->slot;
+        ir.array_index = acc->index->temp_no;
+        ir.array_width = acc->width;
+        ir_emit(ir);
+        return self;
+    }
+
+    if (is_id(self)) {
+        struct Id *id = (struct Id *)self;
+
+        struct IR ir = {0};
+        ir.op          = IR_LOAD;
+        ir.dst         = e->temp_no;
+        ir.array_base  = id->offset;
+        ir.array_index = 0;         
+        ir.array_width = id->base.type->width; 
+        ir_emit(ir);
+        return self;
+    }
+
+
+    if (is_constant(self)) {
+        struct Constant *c = (struct Constant *)self;
+
+        struct IR ir = {0};
+        ir.op   = IR_MOVE;
+        ir.dst  = e->temp_no;
+        ir.src1 = c->int_val;   // TODO: support float 
+        ir_emit(ir);
+        return self;
+    }
+
+    /* ===== Arith: + - * / ===== */
+    if (is_arith(self)) {
+        struct Arith *a = (struct Arith *)self;
+
+        expr_gen((struct Node *)a->e1);
+        expr_gen((struct Node *)a->e2);
+
+        struct IR ir = {0};
+        switch (a->base.base.op->tag) {
+        case PLUS:  ir.op = IR_ADD; break;
+        case MINUS: ir.op = IR_SUB; break;
+        case STAR:  ir.op = IR_MUL; break;
+        case SLASH: ir.op = IR_DIV; break;
+        default:    return self;   
+        }
+
+        ir.dst  = e->temp_no;
+        ir.src1 = a->e1->temp_no;
+        ir.src2 = a->e2->temp_no;
+        ir_emit(ir);
+        return self;
+    }
+
+    /* ===== Unary: -x / !x ===== */
+    if (is_unary(self)) {
+        struct Unary *u = (struct Unary *)self;
+
+        expr_gen((struct Node *)u->expr);
+
+        struct IR ir = {0};
+        if (u->base.base.op->tag == MINUS)
+            ir.op = IR_NEG;
+        else if (u->base.base.op->tag == NOT)
+            ir.op = IR_NOT;
+        else
+            return self;
+
+        ir.dst  = e->temp_no;
+        ir.src1 = u->expr->temp_no;
+        ir_emit(ir);
+        return self;
+    }
+
+    /* ===== Rel / Logical：由 jumping() 负责，不在这里生成 IR ===== */
     return self;
 }
+
 
 static void expr_jumping(struct Node *self, int t, int f)
 {
@@ -227,6 +354,13 @@ struct Constant *constant_new(struct lexer_token *tok, struct Type *type)
 
     c->base.op   = tok;
     c->base.type = type;
+    c->base.base.tag = TAG_CONSTANT;
+
+    if (tok->tag == NUM) {
+        c->int_val = tok->int_val;
+    } else if (tok->tag == REAL) {
+        c->real_val = tok->real_val;
+    }
 
     c->base.base.gen      = (void *)expr_gen;
     c->base.base.jumping  = constant_jumping;
@@ -234,6 +368,7 @@ struct Constant *constant_new(struct lexer_token *tok, struct Type *type)
 
     return c;
 }
+
 
 struct Constant *constant_int(int value)
 {
@@ -337,6 +472,8 @@ struct Arith *arith_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e
 
     a->e1 = e1;
     a->e2 = e2;
+
+    a->base.base.base.tag = TAG_ARITH;
 
     a->base.base.base.gen      = (void *)expr_gen;
     a->base.base.base.jumping  = expr_jumping;
@@ -451,6 +588,8 @@ struct Logical *logical_new(struct lexer_token *tok, struct Expr *e1, struct Exp
     l->e1 = e1;
     l->e2 = e2;
 
+    l->base.base.tag = TAG_LOGICAL;
+
     l->base.base.gen      = (void *)expr_gen;
     l->base.base.jumping  = expr_jumping;
     l->base.base.tostring = logical_tostring;
@@ -499,10 +638,11 @@ static void and_jumping(struct Node *self, int t, int f)
 {
     struct And *a = (struct And *)self;
 
-    int label = (f != 0) ? f : node_newlabel();
+    int label = f != 0 ? f : node_newlabel();
 
-    a->base.e1->base.jumping((struct Node *)a->base.e1, 0, label);
-    a->base.e2->base.jumping((struct Node *)a->base.e2, t, f);
+    a->base.e1->base.jumping((struct Node*)a->base.e1, 0, label);
+
+    a->base.e2->base.jumping((struct Node*)a->base.e2, t, f);
 
     if (f == 0)
         node_emitlabel(label);
@@ -535,10 +675,11 @@ static void or_jumping(struct Node *self, int t, int f)
 {
     struct Or *o = (struct Or *)self;
 
-    int label = (t != 0) ? t : node_newlabel();
+    int label = t != 0 ? t : node_newlabel();
 
-    o->base.e1->base.jumping((struct Node *)o->base.e1, label, 0);
-    o->base.e2->base.jumping((struct Node *)o->base.e2, t, f);
+    o->base.e1->base.jumping((struct Node*)o->base.e1, label, 0);
+
+    o->base.e2->base.jumping((struct Node*)o->base.e2, t, f);
 
     if (t == 0)
         node_emitlabel(label);
@@ -571,8 +712,9 @@ struct Not *not_new(struct lexer_token *tok, struct Expr *x)
 static void not_jumping(struct Node *self, int t, int f)
 {
     struct Not *n = (struct Not *)self;
-    n->base.e1->base.jumping((struct Node *)n->base.e1, f, t);
+    n->base.e1->base.jumping((struct Node*)n->base.e1, f, t);
 }
+
 
 static char *not_tostring(struct Node *self)
 {
@@ -603,6 +745,18 @@ struct Rel *rel_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
     r->base.e1 = e1;
     r->base.e2 = e2;
 
+    switch (tok->tag) {
+    case LT:  r->relop = IR_LT; break;
+    case LE:  r->relop = IR_LE; break;
+    case GT:  r->relop = IR_GT; break;
+    case GE:  r->relop = IR_GE; break;
+    case EQ:  r->relop = IR_EQ; break;
+    case NE:  r->relop = IR_NE; break;
+    default:
+        node_error((struct Node*)r, "unknown relational operator");
+    }
+
+    r->base.base.base.tag = TAG_REL;
     r->base.base.base.gen      = (void *)expr_gen;
     r->base.base.base.tostring = logical_tostring;
     r->base.base.base.jumping  = rel_jumping;
@@ -614,6 +768,17 @@ static void rel_jumping(struct Node *self, int t, int f)
 {
     struct Rel *r = (struct Rel *)self;
 
+    expr_gen((struct Node *)r->base.e1);
+    expr_gen((struct Node *)r->base.e2);
+
+    struct IR ir = {0};
+    ir.op    = IR_IF_FALSE;
+    ir.src1  = r->base.e1->temp_no;
+    ir.src2  = r->base.e2->temp_no;
+    ir.relop = r->relop;
+    ir.label = f;
+    ir_emit(ir);
+
     char *s1 = r->base.e1->base.tostring((struct Node *)r->base.e1);
     char *s2 = r->base.e2->base.tostring((struct Node *)r->base.e2);
     char *op = token_to_string(r->base.base.op);
@@ -624,6 +789,7 @@ static void rel_jumping(struct Node *self, int t, int f)
 
     node_emit_jumps(test, t, f);
 }
+
 
 /* ============================================================
  *  Access
@@ -641,6 +807,11 @@ struct Access *access_new(struct Expr *array, struct Expr *index, struct Type *t
     a->array = array;
     a->index = index;
 
+    struct Id *id = (struct Id *)array; 
+    a->slot = id->offset; 
+    a->width = type->width;
+
+    a->base.base.base.tag = TAG_ACCESS;
     a->base.base.base.gen      = (void *)expr_gen;
     a->base.base.base.jumping  = expr_jumping;
     a->base.base.base.tostring = access_tostring;
@@ -675,6 +846,8 @@ struct Id *id_new(struct lexer_token *tok, struct Type *type, int offset)
     i->base.type = type;
     i->offset    = offset;
 
+    i->base.base.tag = TAG_ID;
+
     i->base.base.gen      = (void *)expr_gen;
     i->base.base.jumping  = expr_jumping;
     i->base.base.tostring = id_tostring;
@@ -699,6 +872,8 @@ struct Seq *seq_new(struct Stmt *s1, struct Stmt *s2)
     struct Seq *s = malloc(sizeof(struct Seq));
     s->s1 = s1;
     s->s2 = s2;
+
+    s->base.base.tag = TAG_SEQ;
     s->base.base.gen = seq_gen;
     return s;
 }
@@ -732,6 +907,7 @@ struct If *if_new(struct Expr *expr, struct Stmt *stmt)
     i->expr = expr;
     i->stmt = stmt;
 
+    i->base.base.tag = TAG_IF;
     i->base.base.gen = if_gen;
 
     return i;
@@ -762,6 +938,7 @@ struct Else *else_new(struct Expr *expr, struct Stmt *s1, struct Stmt *s2)
     e->stmt1 = s1;
     e->stmt2 = s2;
 
+    e->base.base.tag = TAG_ELSE;
     e->base.base.gen = else_gen;
 
     return e;
@@ -795,6 +972,8 @@ struct While *while_new(void)
     struct While *w = malloc(sizeof(struct While));
     w->expr = NULL;
     w->stmt = NULL;
+
+    w->base.base.tag = TAG_WHILE;
     w->base.base.gen = while_gen;
     return w;
 }
@@ -831,6 +1010,8 @@ struct Do *do_new(void)
     struct Do *d = malloc(sizeof(struct Do));
     d->stmt = NULL;
     d->expr = NULL;
+
+    d->base.base.tag = TAG_DO;
     d->base.base.gen = do_gen;
     return d;
 }
@@ -868,6 +1049,8 @@ struct Break *break_new(void)
         node_error((struct Node *)br, "unenclosed break");
 
     br->stmt = Stmt_Enclosing;
+
+    br->base.base.tag = TAG_BREAK;
     br->base.base.gen = break_gen;
 
     return br;
@@ -892,6 +1075,7 @@ struct Set *set_new(struct Id *id, struct Expr *expr)
     s->id   = id;
     s->expr = expr;
 
+    s->base.base.tag = TAG_SET;
     s->base.base.gen = set_gen;
 
     return s;
@@ -901,10 +1085,21 @@ static void set_gen(struct Node *self, int b, int a)
 {
     struct Set *s = (struct Set *)self;
 
+    expr_gen((struct Node *)s->expr);
+
     char *lhs = s->id->base.base.tostring((struct Node *)s->id);
     char *rhs = s->expr->base.tostring((struct Node *)s->expr);
 
     node_emit("%s = %s", lhs, rhs);
+
+    struct IR ir = {0}; 
+    ir.op          = IR_STORE;
+    ir.array_base  = s->id->offset;
+    ir.array_index = 0;
+    ir.array_width = s->id->base.type->width;
+    ir.src1        = s->expr->temp_no;
+
+    ir_emit(ir);
 }
 
 /* ============================================================
@@ -921,6 +1116,10 @@ struct SetElem *setelem_new(struct Access *x, struct Expr *y)
     s->index = x->index;
     s->expr  = y;
 
+    s->slot = x->slot; 
+    s->width = x->width;
+
+    s->base.base.tag = TAG_SETELEM;
     s->base.base.gen = setelem_gen;
 
     return s;
@@ -930,18 +1129,30 @@ static void setelem_gen(struct Node *self, int b, int a)
 {
     struct SetElem *s = (struct SetElem *)self;
 
+    expr_gen((struct Node *)s->index);
+    expr_gen((struct Node *)s->expr);
+
     char *arr = s->array->base.base.tostring((struct Node *)s->array);
     char *idx = s->index->base.tostring((struct Node *)s->index);
     char *val = s->expr->base.tostring((struct Node *)s->expr);
 
     node_emit("%s [ %s ] = %s", arr, idx, val);
+
+    struct IR ir = {0}; 
+    ir.op          = IR_STORE; 
+    ir.array_base  = s->slot;
+    ir.array_index = s->index->temp_no;
+    ir.array_width = s->width;
+    ir.src1        = s->expr->temp_no;
+    ir_emit(ir);
 }
+
 
 /* ============================================================
  *  Temp
  * ============================================================ */
 
-static int temp_count = 0;
+static int temp_node_count = 0;
 
 static char *temp_tostring(struct Node *self)
 {
@@ -957,7 +1168,7 @@ struct Temp *temp_new(struct Type *type)
 
     t->base.op   = NULL;
     t->base.type = type;
-    t->number    = temp_count++;
+    t->number    = temp_node_count++;
 
     t->base.base.gen      = (void *)expr_gen;
     t->base.base.jumping  = expr_jumping;
@@ -980,6 +1191,8 @@ struct Unary *unary_new(struct lexer_token *tok, struct Expr *expr)
     u->base.base.type = type_max(Type_Int, expr->type);
 
     u->expr = expr;
+
+    u->base.base.base.tag = TAG_UNARY;
 
     u->base.base.base.gen      = (void *)expr_gen;
     u->base.base.base.jumping  = expr_jumping;

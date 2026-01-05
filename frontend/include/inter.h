@@ -4,13 +4,39 @@
 #define INTER_H
 
 #include "lexer.h"
+#include "ir.h"
 #include "symbols.h"
 #include <stddef.h>
 
 /* ===== Node ===== */
+enum NodeTag {
+    /* 基础 */
+    TAG_NODE = 0,
+
+    /* 表达式节点 */
+    TAG_ID,
+    TAG_CONSTANT,
+    TAG_ACCESS,
+    TAG_ARITH,
+    TAG_UNARY,
+    TAG_REL,
+    TAG_LOGICAL,
+
+    /* 语句节点 */
+    TAG_SET,
+    TAG_SETELEM,
+    TAG_IF,
+    TAG_ELSE,
+    TAG_WHILE,
+    TAG_DO,
+    TAG_BREAK,
+    TAG_SEQ,
+    TAG_BLOCK,
+};
 
 struct Node {
     int  lexline;
+    enum NodeTag tag;
     void (*gen)(struct Node *self, int b, int a);
     void (*jumping)(struct Node *self, int t, int f);
     char *(*tostring)(struct Node *self);
@@ -28,6 +54,7 @@ struct Expr {
     struct Node       base;
     struct lexer_token *op;
     struct Type       *type;
+    int temp_no;
 };
 
 struct Expr *expr_new(struct lexer_token *tok, struct Type *type);
@@ -58,6 +85,7 @@ struct Logical {
     struct Expr base;
     struct Expr *e1;
     struct Expr *e2;
+    int temp_no; 
 };
 
 struct Logical *logical_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2);
@@ -68,6 +96,9 @@ struct Access {
     struct Op  base;
     struct Expr *array;
     struct Expr *index;
+
+    int slot; 
+    int width;
 };
 
 struct Access *access_new(struct Expr *array, struct Expr *index, struct Type *type);
@@ -204,9 +235,9 @@ struct Or {
 struct Or *or_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);
 
 /* ===== Rel ===== */
-
 struct Rel {
     struct Logical base;
+    enum IR_RelOp relop;
 };
 
 struct Rel *rel_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);
@@ -238,6 +269,9 @@ struct SetElem {
     struct Id   *array;
     struct Expr *index;
     struct Expr *expr;
+
+    int slot; 
+    int width;
 };
 
 struct SetElem *setelem_new(struct Access *x, struct Expr *y);
