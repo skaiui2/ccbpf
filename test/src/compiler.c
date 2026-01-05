@@ -7,25 +7,8 @@
 #include "parser.h"
 #include "ccbpf.h"
 
-int main(int argc, char **argv)
+void bpf_vm_code_test()
 {
-    const char *filename = "../hello.c";
-    if (argc > 1) {
-        filename = argv[1];
-    }
-
-    struct lexer lex;
-    lexer_init(&lex);
-    lexer_set_input(filename);
-
-    struct Parser *p = parser_new(&lex);
-    if (!p) {
-        fprintf(stderr, "failed to create parser\n");
-        return 1;
-    }
-
-    parser_program(p);
-
     struct bpf_insn prog[] = {
         // mem[0] = 10
         { BPF_LD|BPF_IMM, 0,0,10 },
@@ -75,6 +58,29 @@ int main(int argc, char **argv)
     u_int result = bpf_filter(prog, dummy, sizeof(dummy), sizeof(dummy));
 
     printf("BPF sum result: %u\n", result); // 预期：150
+}
+
+
+int main(int argc, char **argv)
+{
+    const char *filename = "../hello.c";
+    if (argc > 1) {
+        filename = argv[1];
+    }
+
+    struct lexer lex;
+    lexer_init(&lex);
+    lexer_set_input(filename);
+
+    struct Parser *p = parser_new(&lex);
+    if (!p) {
+        fprintf(stderr, "failed to create parser\n");
+        return 1;
+    }
+
+    parser_program(p);
+
+    bpf_vm_code_test();
 
     return 0;
 }

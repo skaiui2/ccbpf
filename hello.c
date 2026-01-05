@@ -1,13 +1,64 @@
 {
-    int i; int j; float v; float x; float[100] a;
-    x = 3.14;
-    x = x & 1;
+    int i;
+    float x;
+    float v;
+    float a[5];
+
+    a[0] = 5.0;
+    a[1] = 1.0;
+    a[2] = 4.0;
+    a[3] = 2.0;
+    a[4] = 3.0;
+
+    v = 3.14;
+    x = v & 1;
     x = x | 1;
 
-    while(true) {
-        do i = i+1; while(a[i] < v);
-        do j = j-1; while(a[j] > v);
-        if (i >= j) break;
-        x = a[i]; a[i] = a[j]; a[j] = x;
+    if (a[0] > a[1]) {
+        x = a[0];
+        a[0] = a[1];
+        a[1] = x;
+    }
+
+    if (a[1] > a[2]) {
+        x = a[1];
+        a[1] = a[2];
+        a[2] = x;
+    }
+
+    if (a[2] > a[3]) {
+        x = a[2];
+        a[2] = a[3];
+        a[3] = x;
+    }
+
+    if (a[3] > a[4]) {
+        x = a[3];
+        a[3] = a[4];
+        a[4] = x;
+    }
+
+    if (a[0] > a[1]) {
+        x = a[0];
+        a[0] = a[1];
+        a[1] = x;
+    }
+
+    if (a[1] > a[2]) {
+        x = a[1];
+        a[1] = a[2];
+        a[2] = x;
+    }
+
+    if (a[2] > a[3]) {
+        x = a[2];
+        a[2] = a[3];
+        a[3] = x;
+    }
+
+    if (a[3] > a[4]) {
+        x = a[3];
+        a[3] = a[4];
+        a[4] = x;
     }
 }

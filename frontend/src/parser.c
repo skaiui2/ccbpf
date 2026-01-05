@@ -144,9 +144,23 @@ struct Stmt *parser_block(struct Parser *p)
 void parser_decls(struct Parser *p)
 {
     while (p->look->tag == BASIC) {
-        struct Type *tp = parser_type(p);
-        struct lexer_token *tok = p->look;
+        struct Type *tp = parser_type(p);    
+        struct lexer_token *tok = p->look;   
         parser_match(p, ID);
+
+        if (p->look->tag == LBRACKET) {     
+            parser_move(p);
+
+            if (p->look->tag != NUM)
+                parser_error(p, "array size must be a number");
+
+            int size = p->look->int_val;
+            parser_move(p);
+            parser_match(p, RBRACKET);     
+
+            tp = (struct Type *)array_new(tp, size);
+        }
+
         parser_match(p, SEMICOLON);
 
         if (!tok->lexeme)
