@@ -34,8 +34,6 @@ enum IR_Op {
 enum IR_RelOp {
     IR_GT,  
     IR_GE, 
-    IR_LT,  
-    IR_LE,
     IR_EQ,
     IR_NE,  
 };

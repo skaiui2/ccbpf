@@ -760,17 +760,17 @@ struct Rel *rel_new(struct lexer_token *tok, struct Expr *e1, struct Expr *e2)
     r->base.e2 = e2;
 
     switch (tok->tag) {
-    case LT:  r->relop = IR_LT; break;
-    case LE:  r->relop = IR_LE; break;
-    case GT:  r->relop = IR_GT; break;
-    case GE:  r->relop = IR_GE; break;
-    case EQ:  r->relop = IR_EQ; break;
-    case NE:  r->relop = IR_NE; break;
+    case LT:  r->relop = AST_LT; break;
+    case LE:  r->relop = AST_LE; break;
+    case GT:  r->relop = AST_GT; break;
+    case GE:  r->relop = AST_GE; break;
+    case EQ:  r->relop = AST_EQ; break;
+    case NE:  r->relop = AST_NE; break;
     default:
         node_error((struct Node*)r, "unknown relational operator");
     }
 
-    r->base.base.base.tag = TAG_REL;
+    r->base.base.base.tag      = TAG_REL;
     r->base.base.base.gen      = (void *)expr_gen;
     r->base.base.base.tostring = logical_tostring;
     r->base.base.base.jumping  = rel_jumping;
@@ -790,8 +790,29 @@ static void rel_jumping(struct Node *self, int t, int f)
         ir.op    = IR_IF_FALSE;
         ir.src1  = r->base.e1->temp_no;
         ir.src2  = r->base.e2->temp_no;
-        ir.relop = r->relop;
         ir.label = f;
+
+        switch (r->relop) {
+        case AST_LT:
+            ir.relop = IR_GE;   // a < b → !(a >= b)
+            break;
+        case AST_LE:
+            ir.relop = IR_GT;   // a <= b → !(a > b)
+            break;
+        case AST_GT:
+            ir.relop = IR_GT;
+            break;
+        case AST_GE:
+            ir.relop = IR_GE;
+            break;
+        case AST_EQ:
+            ir.relop = IR_EQ;
+            break;
+        case AST_NE:
+            ir.relop = IR_NE;
+            break;
+        }
+
         ir_emit(ir);
     }
 

@@ -235,9 +235,18 @@ struct Or {
 struct Or *or_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);
 
 /* ===== Rel ===== */
+enum AST_RelOp {
+    AST_LT,
+    AST_LE,
+    AST_GT,
+    AST_GE,
+    AST_EQ,
+    AST_NE,
+};
+
 struct Rel {
     struct Logical base;
-    enum IR_RelOp relop;
+    enum AST_RelOp relop;
 };
 
 struct Rel *rel_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);

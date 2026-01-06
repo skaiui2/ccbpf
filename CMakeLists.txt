@@ -11,18 +11,21 @@ include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/bpf/include
     ${CMAKE_CURRENT_SOURCE_DIR}/backend/include
     ${CMAKE_CURRENT_SOURCE_DIR}/test/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/ir/include
 )
 
 file(GLOB LIB_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/frontend/src/*.c")
 file(GLOB LIB_BPF_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/bpf/src/*.c")
 file(GLOB LIB_BACK_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/backend/src/*.c")
 file(GLOB LIB_TEST_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/test/src/*.c")
+file(GLOB LIB_IR_SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/ir/src/*.c")
 
 add_executable(ccbpf  
     ${LIB_SOURCES}
     ${LIB_BPF_SOURCES}
     ${LIB_BACK_SOURCES}
     ${LIB_TEST_SOURCES}
+    ${LIB_IR_SOURCES}
 )
 
 add_custom_target(cleanup

@@ -54,18 +54,19 @@ void ir_emit(struct IR ir)
         printf("[IR] STORE MEM[%d + t%d * %d] <- t%d\n",
                ir.array_base, ir.array_index, ir.array_width, ir.src1);
         break;
-    case IR_IF_FALSE:
-        printf("[IR] IFFALSE (t%d %s t%d) goto L%d\n",
-               ir.src1,
-               (ir.relop == IR_LT ? "<" :
-                ir.relop == IR_LE ? "<=" :
-                ir.relop == IR_GT ? ">" :
-                ir.relop == IR_GE ? ">=" :
-                ir.relop == IR_EQ ? "==" :
-                ir.relop == IR_NE ? "!=" : "?"),
-               ir.src2,
-               ir.label);
+    case IR_IF_FALSE: { 
+        const char *op_str = "?";
+        switch (ir.relop) {
+        case IR_GT: op_str = ">";  break;
+        case IR_GE: op_str = ">="; break;
+        case IR_EQ: op_str = "=="; break;
+        case IR_NE: op_str = "!="; break;
+        }
+    
+        printf("[IR] IFFALSE !(t%d %s t%d) goto L%d\n",
+           ir.src1, op_str, ir.src2, ir.label);
         break;
+    }
     case IR_GOTO:
         if (ir.label == 0) break;
         printf("[IR] GOTO L%d\n", ir.label);

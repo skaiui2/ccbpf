@@ -354,8 +354,8 @@ struct Expr *parser_rel(struct Parser *p)
 
     switch (p->look->tag) {
     case LT:
-    case GT:
     case LE:
+    case GT:
     case GE:
     case EQ:
     case NE: {
