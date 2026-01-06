@@ -160,7 +160,13 @@ int node_newlabel(void)
 void node_emitlabel(int i)
 {
     printf("L%d:\n", i);
+
+    struct IR ir = {0};
+    ir.op    = IR_LABEL;
+    ir.label = i;
+    ir_emit(ir);
 }
+
 
 void node_emit(const char *fmt, ...)
 {
@@ -217,14 +223,22 @@ static struct Node *expr_gen(struct Node *self)
     if (is_access(self)) {
         struct Access *acc = (struct Access *)self;
 
-        expr_gen((struct Node *)acc->index);
+        /* 只支持编译期常量下标：arr[1] 这种 */
+        if (acc->index->base.tag != TAG_CONSTANT) {
+            fprintf(stderr, "non-constant array index not supported in MVP\n");
+            exit(1);
+        }
+
+        struct Constant *cidx = (struct Constant *)acc->index;
+        int idx = cidx->int_val;         
+        int elem_offset = acc->slot + idx * acc->width;
 
         struct IR ir = {0};
         ir.op          = IR_LOAD;
         ir.dst         = e->temp_no;
-        ir.array_base  = acc->slot;
-        ir.array_index = acc->index->temp_no;
-        ir.array_width = acc->width;
+        ir.array_base  = elem_offset;     /* 直接用元素 offset */
+        ir.array_index = 0;           
+        ir.array_width = acc->width;    
         ir_emit(ir);
         return self;
     }
@@ -771,13 +785,15 @@ static void rel_jumping(struct Node *self, int t, int f)
     expr_gen((struct Node *)r->base.e1);
     expr_gen((struct Node *)r->base.e2);
 
-    struct IR ir = {0};
-    ir.op    = IR_IF_FALSE;
-    ir.src1  = r->base.e1->temp_no;
-    ir.src2  = r->base.e2->temp_no;
-    ir.relop = r->relop;
-    ir.label = f;
-    ir_emit(ir);
+    if (f != 0) {
+        struct IR ir = {0};
+        ir.op    = IR_IF_FALSE;
+        ir.src1  = r->base.e1->temp_no;
+        ir.src2  = r->base.e2->temp_no;
+        ir.relop = r->relop;
+        ir.label = f;
+        ir_emit(ir);
+    }
 
     char *s1 = r->base.e1->base.tostring((struct Node *)r->base.e1);
     char *s2 = r->base.e2->base.tostring((struct Node *)r->base.e2);
@@ -789,7 +805,6 @@ static void rel_jumping(struct Node *self, int t, int f)
 
     node_emit_jumps(test, t, f);
 }
-
 
 /* ============================================================
  *  Access
@@ -1129,24 +1144,32 @@ static void setelem_gen(struct Node *self, int b, int a)
 {
     struct SetElem *s = (struct SetElem *)self;
 
-    expr_gen((struct Node *)s->index);
+    /* 只支持编译期常量下标 */
+    if (s->index->base.tag != TAG_CONSTANT) {
+        fprintf(stderr, "Error: non-constant array index not supported in MVP SetElem.\n");
+        exit(1);
+    }
+
+    struct Constant *cidx = (struct Constant *)s->index;
+    int idx = cidx->int_val;
+    int elem_offset = s->slot + idx * s->width;
+
     expr_gen((struct Node *)s->expr);
 
     char *arr = s->array->base.base.tostring((struct Node *)s->array);
-    char *idx = s->index->base.tostring((struct Node *)s->index);
+    char *idx_str = s->index->base.tostring((struct Node *)s->index);
     char *val = s->expr->base.tostring((struct Node *)s->expr);
 
-    node_emit("%s [ %s ] = %s", arr, idx, val);
+    node_emit("%s [ %s ] = %s", arr, idx_str, val);
 
-    struct IR ir = {0}; 
-    ir.op          = IR_STORE; 
-    ir.array_base  = s->slot;
-    ir.array_index = s->index->temp_no;
+    struct IR ir = {0};
+    ir.op          = IR_STORE;
+    ir.array_base  = elem_offset;         /* 固定槽位 offset */
+    ir.array_index = 0;                   /* 不再使用 temp index */
     ir.array_width = s->width;
     ir.src1        = s->expr->temp_no;
     ir_emit(ir);
 }
-
 
 /* ============================================================
  *  Temp

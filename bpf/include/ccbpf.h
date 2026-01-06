@@ -119,7 +119,7 @@ struct bpf_insn {
 /*
  * Number of scratch memory words (for BPF_LD|BPF_MEM and BPF_ST).
  */
-#define BPF_MEMWORDS 16
+#define BPF_MEMWORDS 64
 
 u_int bpf_filter(register struct bpf_insn *pc, register u_char *p, u_int wirelen, register u_int buflen);
 	

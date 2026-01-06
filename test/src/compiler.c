@@ -6,6 +6,10 @@
 #include "lexer.h"
 #include "parser.h"
 #include "ccbpf.h"
+#include "ir.h"
+#include "bpf_builder.h"
+#include "ccbpf.h"
+#include "ir_lowering.h"
 
 void bpf_vm_code_test()
 {
@@ -60,13 +64,27 @@ void bpf_vm_code_test()
     printf("BPF sum result: %u\n", result); // 预期：150
 }
 
+static int compute_label_count(struct IR *head)
+{
+    int max = -1;
+    struct IR *p;
+
+    for (p = head; p; p = p->next) {
+        if ((p->op == IR_LABEL ||
+             p->op == IR_IF_FALSE ||
+             p->op == IR_GOTO) &&
+            p->label > max)
+            max = p->label;
+    }
+
+    return max + 1;
+}
 
 int main(int argc, char **argv)
 {
     const char *filename = "../hello.c";
-    if (argc > 1) {
+    if (argc > 1)
         filename = argv[1];
-    }
 
     struct lexer lex;
     lexer_init(&lex);
@@ -79,8 +97,29 @@ int main(int argc, char **argv)
     }
 
     parser_program(p);
-
     bpf_vm_code_test();
+
+    struct bpf_builder b;
+    bpf_builder_init(&b);
+
+    int label_count = compute_label_count(ir_head);
+
+    ir_lower_program(ir_head, label_count, &b);
+
+    bpf_builder_emit(&b,
+        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, MEM_C));
+    bpf_builder_emit(&b,
+        (struct bpf_insn)BPF_STMT(BPF_RET | BPF_A, 0));
+
+    struct bpf_insn *prog = bpf_builder_data(&b);
+    int prog_len = bpf_builder_count(&b);
+
+    unsigned char dummy[1] = {0};
+    u_int ret = bpf_filter(prog, dummy, 0, 0);
+
+    printf("BPF VM result = %u\n", ret);
+
+    bpf_builder_free(&b);
 
     return 0;
 }

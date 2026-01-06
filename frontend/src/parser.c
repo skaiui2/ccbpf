@@ -1,18 +1,14 @@
-/* parser.c */
-
 #include "parser.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
 
-/* 由 type/ir 模块提供的全局类型与常量 */
 extern struct Type     *Type_Int;
 extern struct Type     *Type_Float;
 extern struct Type     *Type_Bool;
 extern struct Constant *Constant_true;
 extern struct Constant *Constant_false;
 
-/* basic 关键字到 Type* 的映射：依赖 lexer_reserve 时的 lexeme */
 static struct Type *basic_type_from_token(struct lexer_token *tok)
 {
     if (!tok || !tok->lexeme) return NULL;
@@ -44,7 +40,6 @@ static char *token_to_string(struct lexer_token *tok)
         return buf;
     }
 
-    // 显式处理所有运算符 / 关键符号
     switch (tok->tag) {
     case AND_BIT:    return strdup("&");
     case OR_BIT:     return strdup("|");
@@ -458,42 +453,21 @@ struct Expr *parser_factor(struct Parser *p)
     }
 }
 
-/* 静态运算符 token，用于 offset 中的 * 和 + */
 static struct lexer_token TOK_MUL  = { STAR,  0, .lexeme = "*" };
 static struct lexer_token TOK_PLUS = { PLUS,  0, .lexeme = "+" };
 
 struct Access *parser_offset(struct Parser *p, struct Id *a)
 {
     struct Expr *i;
-    struct Expr *w;
-    struct Expr *t1, *t2;
-    struct Expr *loc;
     struct Type *type = a->base.type;
 
     parser_match(p, LBRACKET);
-    i = parser_bool(p);
+    i = parser_bool(p);          /* 这里的i就是元素索引 */
     parser_match(p, RBRACKET);
 
     struct Array *arr = (struct Array *)type;
     type = arr->of;
 
-    w   = (struct Expr *)constant_int(type->width);
-    t1  = (struct Expr *)arith_new(&TOK_MUL, i, w);
-    loc = t1;
-
-    while (p->look->tag == LBRACKET) {
-        parser_match(p, LBRACKET);
-        i = parser_bool(p);
-        parser_match(p, RBRACKET);
-
-        arr  = (struct Array *)type;
-        type = arr->of;
-
-        w  = (struct Expr *)constant_int(type->width);
-        t1 = (struct Expr *)arith_new(&TOK_MUL, i, w);
-        t2 = (struct Expr *)arith_new(&TOK_PLUS, loc, t1);
-        loc = t2;
-    }
-
-    return access_new((struct Expr *)a, loc, type);
+    /* 只支持一维数组：直接把i当作index传下去 */
+    return access_new((struct Expr *)a, i, type);
 }

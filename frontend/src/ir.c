@@ -1,6 +1,7 @@
 #include "ir.h"
 #include <stdio.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 #define IR_POOL_SIZE 2048
 
@@ -12,38 +13,47 @@ struct IR *ir_tail = NULL;
 
 void ir_emit(struct IR ir)
 {
-    /* print IR*/
+    if (ir_count >= IR_POOL_SIZE) {
+        fprintf(stderr, "IR pool overflow\n");
+        exit(1);
+    }
+
+    struct IR *slot = &ir_pool[ir_count++];
+    *slot = ir;
+    slot->next = NULL;
+
+    if (!ir_head) {
+        ir_head = slot;
+        ir_tail = slot;
+    } else {
+        ir_tail->next = slot;
+        ir_tail = slot;
+    }
+
     switch (ir.op) {
     case IR_MOVE:
         printf("[IR] MOVE  t%d <- %d\n", ir.dst, ir.src1);
         break;
-
     case IR_ADD:
         printf("[IR] ADD   t%d <- t%d + t%d\n", ir.dst, ir.src1, ir.src2);
         break;
-
     case IR_SUB:
         printf("[IR] SUB   t%d <- t%d - t%d\n", ir.dst, ir.src1, ir.src2);
         break;
-
     case IR_MUL:
         printf("[IR] MUL   t%d <- t%d * t%d\n", ir.dst, ir.src1, ir.src2);
         break;
-
     case IR_DIV:
         printf("[IR] DIV   t%d <- t%d / t%d\n", ir.dst, ir.src1, ir.src2);
         break;
-
     case IR_LOAD:
         printf("[IR] LOAD  t%d <- MEM[%d + t%d * %d]\n",
                ir.dst, ir.array_base, ir.array_index, ir.array_width);
         break;
-
     case IR_STORE:
         printf("[IR] STORE MEM[%d + t%d * %d] <- t%d\n",
                ir.array_base, ir.array_index, ir.array_width, ir.src1);
         break;
-
     case IR_IF_FALSE:
         printf("[IR] IFFALSE (t%d %s t%d) goto L%d\n",
                ir.src1,
@@ -56,18 +66,15 @@ void ir_emit(struct IR ir)
                ir.src2,
                ir.label);
         break;
-
     case IR_GOTO:
+        if (ir.label == 0) break;
         printf("[IR] GOTO L%d\n", ir.label);
         break;
-
     case IR_LABEL:
         printf("[IR] LABEL L%d\n", ir.label);
         break;
-
     default:
         printf("[IR] ???\n");
         break;
     }
-
 }
