@@ -1,6 +1,15 @@
 # ccbpf
 A compiler, implement a hook language similar to 4.4BSD-lite's BPF.
 
+## design
+
+```mermaid
+graph LR
+A(frontend)-->B(IR)-->C(backend)-->D(bpf files)-->E(BPF VM)
+```
+
+
+
 ## run
 
 ```
@@ -158,11 +167,11 @@ L7:
 [IR] LABEL L7
 [IR] LOAD  t4 <- MEM[0 + t0 * 4]
 [IR] LOAD  t6 <- MEM[4 + t0 * 4]
-[IR] IFFALSE (t4 < t6) goto L8
+[IR] IFFALSE !(t4 >= t6) goto L8
         iffalse a < b goto L8
 [IR] LOAD  t8 <- MEM[8 + t0 * 4]
 [IR] MOVE  t10 <- 10
-[IR] IFFALSE (t8 == t10) goto L8
+[IR] IFFALSE !(t8 == t10) goto L8
         iffalse c == 10 goto L8
 L9:
 [IR] LABEL L9
