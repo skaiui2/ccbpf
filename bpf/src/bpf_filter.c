@@ -41,7 +41,7 @@
  * "$Header: bpf_filter.c,v 1.16 91/10/27 21:22:35 mccanne Exp $";
  */
 
-#include "ccbpf.h"
+#include "cbpf.h"
 
 #define BPF_ALIGN
 

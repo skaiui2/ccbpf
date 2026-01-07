@@ -2,7 +2,7 @@
 #include "ir.h"
 #include "layout.h"
 #include "bpf_builder.h"
-#include "ccbpf.h"  
+#include "cbpf.h"  
 
 /*
  * IR_MOVE: t_dst = imm

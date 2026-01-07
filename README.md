@@ -313,6 +313,7 @@ BPF program (92 insns):
  89: code=0x0002 jt=0 jf=0 k=25
  90: code=0x0060 jt=0 jf=0 k=25
  91: code=0x0002 jt=0 jf=0 k=2
+Wrote out.ccbpf (94 instructions)
 BPF VM result = 14
 ```
 

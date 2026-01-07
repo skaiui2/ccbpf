@@ -39,8 +39,8 @@
  *
  * @(#) $Header: bpf.h,v 1.24 91/10/27 21:22:32 mccanne Exp $ (LBL)
  */
-#ifndef CCBPF_H
-#define CCBPF_H
+#ifndef CBPF_H
+#define CBPF_H
 
 #include "bpf_types.h"
 

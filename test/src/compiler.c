@@ -5,11 +5,11 @@
 #include<fcntl.h>
 #include "lexer.h"
 #include "parser.h"
-#include "ccbpf.h"
 #include "ir.h"
 #include "bpf_builder.h"
-#include "ccbpf.h"
+#include "cbpf.h"
 #include "ir_lowering.h"
+#include "ccbpf.h"
 
 void bpf_vm_code_test()
 {
@@ -114,8 +114,13 @@ int main(int argc, char **argv)
     struct bpf_insn *prog = bpf_builder_data(&b);
     int prog_len = bpf_builder_count(&b);
 
-    unsigned char dummy[1] = {0};
-    u_int ret = bpf_filter(prog, dummy, 0, 0);
+    write_ccbpf("out.ccbpf", prog, prog_len); 
+    printf("Wrote out.ccbpf (%d instructions)\n", prog_len);
+
+    struct ccbpf_program ccbpf_prog = ccbpf_load("out.ccbpf");
+
+    u_int ret = ccbpf_run(&ccbpf_prog);
+    ccbpf_unload(&ccbpf_prog);
 
     printf("BPF VM result = %u\n", ret);
 

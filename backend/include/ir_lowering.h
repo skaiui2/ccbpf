@@ -1,7 +1,7 @@
 #ifndef IR_LOWERING_H
 #define IR_LOWERING_H
 
-#include "ccbpf.h"
+#include "cbpf.h"
 #include "bpf_builder.h"
 #include "ir.h"
 

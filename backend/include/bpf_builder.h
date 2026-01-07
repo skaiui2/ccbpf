@@ -1,7 +1,7 @@
 #ifndef BPF_BUILDER_H
 #define BPF_BUILDER_H
 
-#include "ccbpf.h"
+#include "cbpf.h"
 
 struct bpf_builder {
     struct bpf_insn *insns;
