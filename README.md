@@ -1,5 +1,13 @@
 # ccbpf
-A compiler, implement a hook language similar to 4.4BSD-lite's BPF.
+A lightweight compiler and virtual machine designed for embedded systems. Inspired by eBPF, built for MCU.
+
+## Overview
+
+This project is a lightweight language runtime designed for embedded systems— a compiler and virtual machine that can run on MCUs, inspired by eBPF but smaller, simpler, and far more portable.
+
+It enables developers to inject dynamic hook code into components such as RTOS kernels, network protocol stacks, and file systems without recompiling firmware, providing a flexible and safe extension mechanism for embedded environments.
+
+Of course, it can also run on general‑purpose operating systems like Linux, where it can serve as an extensible scripting engine or a safe, embeddable runtime for dynamic application logic.
 
 ## design
 
@@ -8,7 +16,15 @@ graph LR
 A(frontend)-->B(IR)-->C(backend)-->D(bpf files)-->E(BPF VM)
 ```
 
+The documents:   [设计文档](docs/中文/设计文档.md)
 
+## Project Status
+
+This project is currently paused for a bit. Since the final target is an embedded platform, I need to build a full embedded operating system first — including a shell, a simple text editor, and other basic system components.
+
+Once that foundation is ready, I’ll continue developing **ccbpf** directly inside the embedded environment, where it’s meant to run.
+
+Stay tuned — the fun part is coming after the OS groundwork is done.
 
 ## run
 
