@@ -15,6 +15,10 @@ enum IR_Op {
     IR_AND,
     IR_OR,
 
+    IR_RET,
+    IR_LOAD_CTX,    
+    IR_LOAD_PKT,
+
     IR_LOAD,
 
     IR_RELOP, 

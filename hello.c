@@ -1,25 +1,11 @@
-{
-    int a;
-    int b;
-    int c;
-    int arr[4];
 
-    a = 3;
-    b = 4;
-    c = a + b * 2;
+struct udp_hdr {
+    int sport;
+    int dport;
+};
 
-    arr[1] = c;
-    a = arr[1];
-
-    if (a < b && c == 10) {
-        c = c - 1;
-    }
-
-    if (a > b || !(c == 10)) {
-        c = c + 1;
-    }
-
-    if (!(a < b) && !(c != 10)) {
-        c = c + 2;
-    }
+int hook(void *ctx, char *pkt) {
+    struct udp_hdr *uh;
+    uh =(struct udp_hdr *)&pkt[34];
+    return 1;
 }

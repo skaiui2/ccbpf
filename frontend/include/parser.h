@@ -12,6 +12,8 @@ struct Parser {
     int                 used;
 };
 
+char *token_to_string(struct lexer_token *tok);
+
 struct Parser *parser_new(struct lexer *lex);
 
 void           parser_program(struct Parser *p);

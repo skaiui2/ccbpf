@@ -6,7 +6,7 @@
 #define IR_POOL_SIZE 2048
 
 static struct IR ir_pool[IR_POOL_SIZE];
-static int ir_count = 0;
+int ir_count = 0;
 
 struct IR *ir_head = NULL;
 struct IR *ir_tail = NULL;
@@ -46,6 +46,19 @@ void ir_emit(struct IR ir)
     case IR_DIV:
         printf("[IR] DIV   t%d <- t%d / t%d\n", ir.dst, ir.src1, ir.src2);
         break;
+    case IR_LOAD_PKT:
+        printf("[IR] LOAD_PKT t%d <- PKT[%d] (size=%d)\n",
+               ir.dst, ir.src1, ir.src2);
+        break;
+
+    case IR_RET:
+        printf("[IR] RET t%d\n", ir.src1);
+        break;
+
+    case IR_LOAD_CTX:
+        printf("[IR] LOAD_CTX t%d <- CTX[%d]\n", ir.dst, ir.src1);
+        break;
+
     case IR_LOAD:
         printf("[IR] LOAD  t%d <- MEM[%d + t%d * %d]\n",
                ir.dst, ir.array_base, ir.array_index, ir.array_width);

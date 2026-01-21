@@ -64,27 +64,25 @@ void bpf_vm_code_test()
     printf("BPF sum result: %u\n", result); // 预期：150
 }
 
-static int compute_label_count(struct IR *head)
+
+/* ===== 清空 IR 池 ===== */
+extern struct IR *ir_head;
+extern struct IR *ir_tail;
+extern int ir_count;   // 你需要在 ir.c 里把 ir_count 改成非 static
+
+static void ir_reset(void)
 {
-    int max = -1;
-    struct IR *p;
-
-    for (p = head; p; p = p->next) {
-        if ((p->op == IR_LABEL ||
-             p->op == IR_IF_FALSE ||
-             p->op == IR_GOTO) &&
-            p->label > max)
-            max = p->label;
-    }
-
-    return max + 1;
+    ir_head = NULL;
+    ir_tail = NULL;
+    ir_count = 0;
 }
 
-int main(int argc, char **argv)
+/* ===== 编译 hello.c → out.ccbpf ===== */
+int compiler_test(void)
 {
+    ir_reset();   // ★ 清空旧 IR
+
     const char *filename = "../hello.c";
-    if (argc > 1)
-        filename = argv[1];
 
     struct lexer lex;
     lexer_init(&lex);
@@ -96,35 +94,72 @@ int main(int argc, char **argv)
         return 1;
     }
 
+    /* 1. 解析 + 生成 IR */
     parser_program(p);
-    bpf_vm_code_test();
 
+    /* 2. IR → BPF */
     struct bpf_builder b;
     bpf_builder_init(&b);
 
-    int label_count = compute_label_count(ir_head);
+    int label_count = 0;
+    for (struct IR *x = ir_head; x; x = x->next)
+        if (x->label > label_count)
+            label_count = x->label;
+    label_count++;
 
     ir_lower_program(ir_head, label_count, &b);
 
-    bpf_builder_emit(&b,
-        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, MEM_C));
-    bpf_builder_emit(&b,
-        (struct bpf_insn)BPF_STMT(BPF_RET | BPF_A, 0));
-
+    /* 3. 写出 out.ccbpf */
     struct bpf_insn *prog = bpf_builder_data(&b);
     int prog_len = bpf_builder_count(&b);
 
-    write_ccbpf("out.ccbpf", prog, prog_len); 
+    write_ccbpf("out.ccbpf", prog, prog_len);
     printf("Wrote out.ccbpf (%d instructions)\n", prog_len);
 
-    struct ccbpf_program ccbpf_prog = ccbpf_load("out.ccbpf");
-
-    u_int ret = ccbpf_run(&ccbpf_prog);
-    ccbpf_unload(&ccbpf_prog);
-
-    printf("BPF VM result = %u\n", ret);
-
     bpf_builder_free(&b);
+    return 0;
+}
+
+/* ===== hook 测试 ===== */
+int test_add(int a, int b)
+{
+    struct hook_ctx ctx = {
+        .arg0 = a,
+        .arg1 = b,
+    };
+
+    struct ccbpf_program prog = ccbpf_load("out.ccbpf");
+
+    uint32_t r = ccbpf_run_ctx(&prog, &ctx, sizeof(ctx));
+
+    ccbpf_unload(&prog);
+
+    return a + b + r;
+}
+
+int test_pkt(uint8_t *packet, int len)
+{
+    struct hook_ctx ctx = { .arg0 = 0, .arg1 = 0 };
+
+    struct ccbpf_program prog = ccbpf_load("out.ccbpf");
+
+    uint32_t r = ccbpf_run_ctx(&prog, packet, len);
+
+    ccbpf_unload(&prog);
+
+    return r;
+}
+
+/* ===== main ===== */
+int main(void)
+{
+    compiler_test();   // 编译 hello.c → out.ccbpf
+    
+    uint8_t buf[64] = {0};
+    buf[23] = 6;   // TCP
+
+    printf("result = %d\n", test_pkt(buf, 64));   // expect PASS
+
 
     return 0;
 }

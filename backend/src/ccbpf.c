@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <arpa/inet.h>
 #include "ccbpf.h"
 #include "bpf_builder.h"  
 
@@ -100,4 +101,15 @@ uint32_t ccbpf_run(struct ccbpf_program *p)
 {
     unsigned char dummy[1] = {0};
     return bpf_filter(p->insns, dummy, 0, 0);
+}
+
+uint32_t ccbpf_run_ctx(struct ccbpf_program *p, void *ctx, size_t ctx_size)
+{
+    uint32_t tmp[2];
+    struct hook_ctx *c = (struct hook_ctx *)ctx;
+
+    tmp[0] = htonl(c->arg0);
+    tmp[1] = htonl(c->arg1);
+
+    return bpf_filter(p->insns, (unsigned char *)tmp, sizeof(tmp), sizeof(tmp));
 }

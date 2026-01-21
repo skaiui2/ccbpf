@@ -39,6 +39,7 @@ enum tag {
 
     RETURN,        // return
     ENUM,          // enum
+    STRUCT, 
 
     PLUS,       // +
     MINUS,      // -

@@ -30,6 +30,13 @@ struct ccbpf_program {
     uint32_t entry;
 };
 
+struct hook_ctx { 
+    uint32_t arg0; 
+    uint32_t arg1; 
+}; 
+
+uint32_t ccbpf_run_ctx(struct ccbpf_program *p, void *ctx, size_t ctx_size);
+
 void write_ccbpf(const char *path, struct bpf_insn *insns, size_t insn_count);
 struct ccbpf_program ccbpf_load(const char *path);
 void ccbpf_unload(struct ccbpf_program *p);

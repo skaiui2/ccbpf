@@ -1,5 +1,6 @@
 #include "inter.h"
 #include "ir.h"
+#include "parser.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,14 @@ static int temp_count = 1;
 int new_temp(void) 
 { 
     return temp_count++; 
+}
+
+static inline int is_ctx(struct Node *n) { 
+    return n->tag == TAG_CTX; 
+}
+
+static inline int is_pkt(struct Node *n) { 
+    return n->tag == TAG_PKT; 
 }
 
 static inline int is_access(struct Node *n) {
@@ -63,70 +72,6 @@ static struct Type *type_max(struct Type *a, struct Type *b)
         return a;
 
     return NULL;
-}
-
-/* ============================================================
- *  token -> string
- * ============================================================ */
-
-static char *token_to_string(struct lexer_token *tok)
-{
-    if (!tok) return strdup("<?>");
-
-    if (tok->lexeme)
-        return strdup(tok->lexeme);
-
-    if (tok->tag == NUM) {
-        char *buf = malloc(32);
-        snprintf(buf, 32, "%d", tok->int_val);
-        return buf;
-    }
-
-    if (tok->tag == REAL) {
-        char *buf = malloc(32);
-        snprintf(buf, 32, "%f", tok->real_val);
-        return buf;
-    }
-
-    // 显式处理所有运算符 / 关键符号
-    switch (tok->tag) {
-    case AND_BIT:    return strdup("&");
-    case OR_BIT:     return strdup("|");
-    case LT:         return strdup("<");
-    case GT:         return strdup(">");
-    case PLUS:       return strdup("+");
-    case MINUS:      return strdup("-");
-    case STAR:       return strdup("*");
-    case SLASH:      return strdup("/");
-    case MOD:        return strdup("%");
-    case ASSIGN:     return strdup("=");
-    case ADD_ASSIGN: return strdup("+=");
-    case SUB_ASSIGN: return strdup("-=");
-    case MUL_ASSIGN: return strdup("*=");
-    case DIV_ASSIGN: return strdup("/=");
-    case INC:        return strdup("++");
-    case DEC:        return strdup("--");
-    case EQ:         return strdup("==");
-    case NE:         return strdup("!=");
-    case LE:         return strdup("<=");
-    case GE:         return strdup(">=");
-    case AND:        return strdup("&&");
-    case OR:         return strdup("||");
-    case LPAREN:     return strdup("(");
-    case RPAREN:     return strdup(")");
-    case LBRACE:     return strdup("{");
-    case RBRACE:     return strdup("}");
-    case LBRACKET:   return strdup("[");
-    case RBRACKET:   return strdup("]");
-    case COMMA:      return strdup(",");
-    case SEMICOLON:  return strdup(";");
-    case DOT:        return strdup(".");
-    default: {
-        char *buf = malloc(16);
-        snprintf(buf, 16, "#%d", tok->tag);
-        return buf;
-    }
-    }
 }
 
 /* ============================================================
@@ -190,6 +135,7 @@ static void node_emit_jumps(const char *test, int t, int f)
     }
 }
 
+
 /* ============================================================
  *  Expr
  * ============================================================ */
@@ -219,6 +165,39 @@ static struct Node *expr_gen(struct Node *self)
 
     if (e->temp_no == 0)
         e->temp_no = new_temp();
+
+        /* ===== pkt[index] ===== */
+    if (is_pkt(self)) {
+        struct PktIndex *p = (struct PktIndex *)self;
+
+        /* 目前只支持常量 index */
+        if (p->index->base.tag != TAG_CONSTANT) {
+            fprintf(stderr, "pkt[] index must be constant for now\n");
+            exit(1);
+        }
+
+        struct Constant *cidx = (struct Constant *)p->index;
+        int offset = cidx->int_val;
+
+        struct IR ir = {0};
+        ir.op   = IR_LOAD_PKT;
+        ir.dst  = e->temp_no;
+        ir.src1 = offset;   /* 用 src1 存 offset */
+        ir.src2 = 1;        /* size = 1 字节，先固定 */
+
+        ir_emit(ir);
+        return self;
+    }
+
+    if (is_ctx(self)) { 
+        struct CtxExpr *c = (struct CtxExpr *)self; 
+        struct IR ir = {0}; 
+        ir.op = IR_LOAD_CTX; 
+        ir.dst = e->temp_no; 
+        ir.src1 = c->offset; // 0 -> arg0, 4 -> arg1 
+        ir_emit(ir); 
+        return self; 
+    }
 
     if (is_access(self)) {
         struct Access *acc = (struct Access *)self;
@@ -327,6 +306,122 @@ static char *expr_tostring(struct Node *self)
     struct Expr *e = (struct Expr *)self;
     return token_to_string(e->op);
 }
+
+
+
+/* ============================================================
+ *  CTX
+ * ============================================================ */
+
+static struct Node *expr_gen(struct Node *self);
+
+static struct Node *ctxexpr_gen(struct Node *self)
+{
+    struct CtxExpr *c = (struct CtxExpr *)self;
+    struct Expr *e = &c->base;
+
+    if (e->temp_no == 0)
+        e->temp_no = new_temp();
+
+    struct IR ir = {0};
+    ir.op   = IR_LOAD_CTX;
+    ir.dst  = e->temp_no;
+    ir.src1 = c->offset;   // 0 -> arg0, 4 -> arg1
+
+    ir_emit(ir);
+    return self;
+}
+
+
+static char *ctxexpr_tostring(struct Node *self)
+{
+    struct CtxExpr *c = (struct CtxExpr *)self;
+
+    // 目前只支持 arg0/arg1，offset 分别是 0 和 4
+    if (c->offset == 0)
+        return strdup("ctx.arg0");
+    else if (c->offset == 4)
+        return strdup("ctx.arg1");
+    else {
+        char *buf = malloc(32);
+        snprintf(buf, 32, "ctx[%d]", c->offset);
+        return buf;
+    }
+}
+
+struct Expr *ctx_load_expr_new(int offset)
+{
+    struct CtxExpr *c = malloc(sizeof(struct CtxExpr));
+
+    c->base.base.tag = TAG_CTX;
+    c->base.op       = NULL;
+    c->base.type     = Type_Int;
+    c->base.temp_no  = 0;
+
+    c->offset = offset;
+
+    c->base.base.gen      = (void *)expr_gen;
+    c->base.base.jumping  = NULL;
+    c->base.base.tostring = ctxexpr_tostring;   // 不再是 NULL
+
+    return &c->base;
+}
+
+/* Return */
+
+/* inter.c */
+
+static void return_gen(struct Node *self, int b, int a)
+{
+    struct Return *r = (struct Return *)self;
+
+    expr_gen((struct Node *)r->expr);
+
+    struct IR ir = {0};
+    ir.op   = IR_RET;
+    ir.src1 = r->expr->temp_no;
+
+    fprintf(stderr, "[IR] EMIT RET t%d\n", ir.src1);
+    ir_emit(ir);
+}
+
+struct Return *return_new(struct Expr *expr)
+{
+    struct Return *r = malloc(sizeof(struct Return));
+    r->expr = expr;
+
+    r->base.base.tag = TAG_RETURN;
+    r->base.base.gen = return_gen;  
+    return r;
+}
+
+/*pkt*/
+static char *pkt_tostring(struct Node *self)
+{
+    struct PktIndex *p = (struct PktIndex *)self;
+    char *idx = p->index->base.tostring((struct Node *)p->index);
+
+    size_t len = strlen(idx) + 16;
+    char *buf = malloc(len);
+    snprintf(buf, len, "pkt[%s]", idx);
+    return buf;
+}
+
+struct Expr *pkt_index_new(struct Expr *index)
+{
+    struct PktIndex *n = malloc(sizeof(*n));
+    n->base.base.tag      = TAG_PKT;
+    n->base.base.gen      = (void *)expr_gen;
+    n->base.base.jumping  = expr_jumping;   
+    n->base.base.tostring = pkt_tostring;
+
+    n->base.op       = NULL;
+    n->base.type     = Type_Int;
+    n->base.temp_no  = 0;
+    n->index         = index;
+    return (struct Expr *)n;
+}
+
 
 /* ============================================================
  *  Stmt
@@ -883,6 +978,7 @@ struct Id *id_new(struct lexer_token *tok, struct Type *type, int offset)
     i->offset    = offset;
 
     i->base.base.tag = TAG_ID;
+    i->base_offset = -1;
 
     i->base.base.gen      = (void *)expr_gen;
     i->base.base.jumping  = expr_jumping;
@@ -1120,6 +1216,10 @@ struct Set *set_new(struct Id *id, struct Expr *expr)
 static void set_gen(struct Node *self, int b, int a)
 {
     struct Set *s = (struct Set *)self;
+    struct Expr *e = s->expr;
+    if (e == NULL) {
+        return; 
+    }
 
     expr_gen((struct Node *)s->expr);
 

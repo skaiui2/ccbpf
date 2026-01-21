@@ -21,7 +21,7 @@ static struct Type *basic_type_from_token(struct lexer_token *tok)
 }
 
 
-static char *token_to_string(struct lexer_token *tok)
+char *token_to_string(struct lexer_token *tok)
 {
     if (!tok) return strdup("<?>");
 
@@ -90,6 +90,7 @@ static void parser_move(struct Parser *p)
     }
 }
 
+
 static void parser_error(struct Parser *p, const char *msg)
 {
     fprintf(stderr, "near line %d: %s \n", p->lex->line, msg);
@@ -108,21 +109,128 @@ struct Parser *parser_new(struct lexer *lex)
 {
     struct Parser *p = malloc(sizeof(struct Parser));
     p->lex  = lex;
-    p->top  = NULL;
+    p->top = env_new(NULL);
     p->used = 0;
     parser_move(p);
     return p;
 }
 
+static struct Stmt *parse_hook_function(struct Parser *p)
+{
+    /* int */
+    if (p->look->tag != BASIC || strcmp(p->look->lexeme, "int") != 0)
+        parser_error(p, "program must start with `int hook(...)`");
+    parser_move(p);
+
+    /* hook */
+    if (p->look->tag != ID || strcmp(p->look->lexeme, "hook") != 0)
+        parser_error(p, "expected `hook`");
+    parser_move(p);
+
+    parser_match(p, LPAREN);
+
+    /* void */
+    if (p->look->tag != ID || strcmp(p->look->lexeme, "void") != 0)
+        parser_error(p, "expected `void`");
+    parser_move(p);
+
+    parser_match(p, STAR);
+
+    /* ctx */
+    if (p->look->tag != ID || strcmp(p->look->lexeme, "ctx") != 0)
+        parser_error(p, "expected `ctx`");
+    parser_move(p);
+
+    parser_match(p, COMMA);
+
+    /* char */
+    if (p->look->tag != BASIC || strcmp(p->look->lexeme, "char") != 0)
+        parser_error(p, "expected `char`");
+    parser_move(p);
+
+    parser_match(p, STAR);
+
+    /* pkt */
+    if (p->look->tag != ID || strcmp(p->look->lexeme, "pkt") != 0)
+        parser_error(p, "expected `pkt`");
+    parser_move(p);
+
+    parser_match(p, RPAREN);
+
+    return parser_block(p);
+}
+
+static void parser_struct_decl(struct Parser *p)
+{
+    parser_match(p, STRUCT);
+
+    if (p->look->tag != ID || !p->look->lexeme)
+        parser_error(p, "expected struct name");
+
+    char *name = strdup(p->look->lexeme);
+    parser_match(p, ID);
+
+    struct StructType *st = struct_new();
+    int offset = 0;
+
+    parser_match(p, LBRACE);
+
+    while (p->look->tag == BASIC) {
+        struct Type *ft = parser_type(p);
+
+        if (p->look->tag != ID || !p->look->lexeme)
+            parser_error(p, "expected field name");
+
+        char *fname = strdup(p->look->lexeme);
+        parser_match(p, ID);
+        parser_match(p, SEMICOLON);
+
+        struct StructFieldInfo *fi = malloc(sizeof(*fi));
+        fi->offset = offset;
+        fi->type   = ft;
+
+        hashmap_put(&st->fields, fname, fi);
+
+        offset += ft->width;
+    }
+
+    st->base.width = offset;
+
+    parser_match(p, RBRACE);
+    parser_match(p, SEMICOLON);
+
+    env_put_type(p->top, name, (struct Type *)st);
+}
+
 void parser_program(struct Parser *p)
 {
-    struct Stmt *s = parser_block(p);
+    while (p->look->tag == STRUCT) {
+        parser_struct_decl(p);
+    }
+
+    struct Stmt *s = parse_hook_function(p);
+
+    fprintf(stderr, "[PP] root stmt=%p tag=%d\n",
+            (void *)s,
+            s ? s->base.tag : -1);
+
+    if (s == Stmt_Null) {
+        fprintf(stderr, "[PP] root is Stmt_Null, nothing to generate\n");
+    }
+
     int begin = node_newlabel();
     int after = node_newlabel();
+
     node_emitlabel(begin);
-    s->base.gen((struct Node *)s, begin, after);
+    if (s && s->base.gen) {
+        s->base.gen((struct Node *)s, begin, after);
+    } else {
+        fprintf(stderr, "[PP] root stmt has no gen, tag=%d\n",
+                s ? s->base.tag : -1);
+    }
     node_emitlabel(after);
 }
+
 
 struct Stmt *parser_block(struct Parser *p)
 {
@@ -133,39 +241,85 @@ struct Stmt *parser_block(struct Parser *p)
     struct Stmt *s = parser_stmts(p);
     parser_match(p, RBRACE);
     p->top = saved;
+
+    fprintf(stderr, "[PP] block root stmt=%p tag=%d\n", (void *)s, s ? s->base.tag : -1);
     return s;
 }
 
+
 void parser_decls(struct Parser *p)
 {
-    while (p->look->tag == BASIC) {
-        struct Type *tp = parser_type(p);    
-        struct lexer_token *tok = p->look;   
-        parser_match(p, ID);
+    while (p->look->tag == BASIC || p->look->tag == STRUCT) {
+        if (p->look->tag == BASIC) {
+            /* 原有 BASIC 声明逻辑 */
+            struct Type *tp = parser_type(p);
+            struct lexer_token *tok = p->look;
+            parser_match(p, ID);
 
-        if (p->look->tag == LBRACKET) {     
-            parser_move(p);
+            if (p->look->tag == LBRACKET) {
+                parser_move(p);
 
-            if (p->look->tag != NUM)
-                parser_error(p, "array size must be a number");
+                if (p->look->tag != NUM)
+                    parser_error(p, "array size must be a number");
 
-            int size = p->look->int_val;
-            parser_move(p);
-            parser_match(p, RBRACKET);     
+                int size = p->look->int_val;
+                parser_move(p);
+                parser_match(p, RBRACKET);
 
-            tp = (struct Type *)array_new(tp, size);
+                tp = (struct Type *)array_new(tp, size);
+            }
+
+            parser_match(p, SEMICOLON);
+
+            if (!tok->lexeme)
+                parser_error(p, "identifier without lexeme");
+
+            struct Id *id = id_new(tok, tp, p->used);
+            env_put_var(p->top, tok->lexeme, id);
+            p->used += tp->width;
         }
+        else if (p->look->tag == STRUCT) {
+            /* 新增：struct NAME *id; 形式 */
 
-        parser_match(p, SEMICOLON);
+            parser_match(p, STRUCT);
 
-        if (!tok->lexeme)
-            parser_error(p, "identifier without lexeme");
+            if (p->look->tag != ID || !p->look->lexeme)
+                parser_error(p, "expected struct name");
 
-        struct Id *id = id_new(tok, tp, p->used);
-        env_put_var(p->top, tok->lexeme, id);
-        p->used += tp->width;
+            char *sname = strdup(p->look->lexeme);
+            parser_match(p, ID);
+
+            struct Type *st = env_get_type(p->top, sname);
+            if (!st || st->tag != TYPE_STRUCT)
+                parser_error(p, "unknown struct type in declaration");
+
+            /* 目前只支持指针：struct NAME *id; */
+            if (p->look->tag != STAR)
+                parser_error(p, "only 'struct T *var;' is supported for now");
+
+            parser_match(p, STAR);
+
+            struct lexer_token *tok = p->look;
+            parser_match(p, ID);
+
+            parser_match(p, SEMICOLON);
+
+            if (!tok->lexeme)
+                parser_error(p, "identifier without lexeme");
+
+            struct PtrType *pt = ptr_new(st);
+            struct Id *id = id_new(tok, (struct Type *)pt, p->used);
+            env_put_var(p->top, tok->lexeme, id);
+
+            /* 指针本身占用一个槽位（按指针宽度） */
+            p->used += pt->base.width;
+        }
+        else {
+            break;
+        }
     }
 }
+
 
 struct Type *parser_type(struct Parser *p)
 {
@@ -202,18 +356,24 @@ struct Type *parser_dims(struct Parser *p, struct Type *base)
 
 struct Stmt *parser_stmts(struct Parser *p)
 {
-    if (p->look->tag == RBRACE)
+    if (!p->look || p->look->tag == RBRACE || p->look->tag == 0)
         return Stmt_Null;
-    struct Stmt *this = parser_stmt(p);
+
+    struct Stmt *this  = parser_stmt(p);
     struct Stmt *other = parser_stmts(p);
+
     return (struct Stmt *)seq_new(this, other);
 }
+
 
 struct Stmt *parser_stmt(struct Parser *p)
 {
     struct Expr *x;
     struct Stmt *s1, *s2;
     struct Stmt *saved;
+    if (!p->look || p->look->tag == 0 || p->look->tag == RBRACE) { 
+        return Stmt_Null;
+    }
 
     switch (p->look->tag) {
     case SEMICOLON:
@@ -270,6 +430,12 @@ struct Stmt *parser_stmt(struct Parser *p)
     case LBRACE:
         return parser_block(p);
 
+    case RETURN:
+        parser_match(p, RETURN);
+        x = parser_bool(p);
+        parser_match(p, SEMICOLON);
+        return (struct Stmt *)return_new(x);
+
     default:
         return parser_assign(p);
     }
@@ -279,6 +445,7 @@ struct Stmt *parser_assign(struct Parser *p)
 {
     struct Stmt *s;
     struct lexer_token *t = p->look;
+
     parser_match(p, ID);
 
     if (!t->lexeme)
@@ -289,13 +456,59 @@ struct Stmt *parser_assign(struct Parser *p)
         parser_error(p, "undeclared id");
 
     if (p->look->tag == ASSIGN) {
-        parser_move(p);
+        parser_move(p);   // take '='
+
+        // special-case: uh = (struct T *)&pkt[NUM]; 
+        if (p->look->tag == LPAREN) {
+
+            parser_match(p, LPAREN);
+            parser_match(p, STRUCT);
+
+            if (p->look->tag != ID)
+                parser_error(p, "expected struct name");
+
+            char *sname = strdup(p->look->lexeme);
+            parser_match(p, ID);
+
+            // optional '*' 
+            if (p->look->tag == STAR)
+                parser_match(p, STAR);
+
+            parser_match(p, RPAREN);
+            parser_match(p, AND_BIT);
+
+            if (p->look->tag != ID || strcmp(p->look->lexeme, "pkt") != 0)
+                parser_error(p, "expected pkt");
+
+            parser_match(p, ID);
+            parser_match(p, LBRACKET);
+
+            if (p->look->tag != NUM)
+                parser_error(p, "expected constant offset");
+
+            int base = p->look->int_val;
+            parser_match(p, NUM);
+            parser_match(p, RBRACKET);
+
+            id->base_offset = base;
+            s = (struct Stmt *)set_new(id, NULL);
+            goto done;
+        }
+
+        // normal assignment 
         s = (struct Stmt *)set_new(id, parser_bool(p));
     } else {
+        // x[y] = expr 
         struct Access *x = parser_offset(p, id);
-        parser_match(p, ASSIGN);
+
+        if (p->look->tag != ASSIGN)
+            parser_error(p, "expected '='");
+
+        parser_move(p);
         s = (struct Stmt *)setelem_new(x, parser_bool(p));
     }
+
+done:
     parser_match(p, SEMICOLON);
     return s;
 }
@@ -438,6 +651,52 @@ struct Expr *parser_factor(struct Parser *p)
     case ID: {
         if (!p->look->lexeme)
             parser_error(p, "identifier without lexeme");
+
+                /* pkt[offset] 语法 */
+        if (strcmp(p->look->lexeme, "pkt") == 0) {
+            parser_move(p);  // 消费 "pkt"
+
+            if (p->look->tag != LBRACKET)
+                parser_error(p, "expected '[' after pkt");
+
+            parser_move(p);  // 消费 '['
+
+            struct Expr *idx = parser_bool(p);  // 先允许常量/简单表达式
+
+            parser_match(p, RBRACKET);
+
+            return (struct Expr *)pkt_index_new(idx);
+        }
+
+        // ctx->arg0 / ctx->arg1
+        if (strcmp(p->look->lexeme, "ctx") == 0) {
+            // 消费 "ctx"
+            parser_move(p);
+
+        if (p->look->tag != DOT)
+            parser_error(p, "expected '.' after ctx");
+
+            parser_move(p); // 消费 '.'
+
+            if (p->look->tag != ID || !p->look->lexeme)
+            parser_error(p, "expected member name after ctx.");
+
+            int offset = -1;
+            if (strcmp(p->look->lexeme, "arg0") == 0)
+                offset = 0;
+            else if (strcmp(p->look->lexeme, "arg1") == 0)
+                offset = 4;
+
+            if (offset < 0)
+                parser_error(p, "unsupported ctx member (only arg0/arg1 supported)");
+
+            parser_move(p); // 消费 "arg0"/"arg1"
+
+            // 调用 inter.c 里的构造函数
+            return (struct Expr *)ctx_load_expr_new(offset);
+        }
+
+        // 普通变量 / 数组
         struct Id *id = env_get_var(p->top, p->look->lexeme);
         if (!id)
             parser_error(p, "undeclared id");
@@ -446,6 +705,7 @@ struct Expr *parser_factor(struct Parser *p)
             return (struct Expr *)id;
         return (struct Expr *)parser_offset(p, id);
     }
+
 
     default:
         parser_error(p, "syntax error");

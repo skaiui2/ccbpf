@@ -69,10 +69,8 @@ static struct lexer_token *new_lexer_token_char(int tag, char ch)
 
 void lexer_reserve(struct lexer *lex, const char *lexeme, int tag)
 {
-    struct lexer_token *w = new_lexer_token_word(lexeme, tag);
-    hashmap_put(&lex->words, w->lexeme, w);
+    hashmap_put(&lex->words, (void *)lexeme, (void *)(intptr_t)tag);
 }
-
 
 static void readch(struct lexer *lex)
 {
@@ -99,6 +97,8 @@ void lexer_init(struct lexer *lex)
     lexer_reserve(lex, "char", BASIC);
     lexer_reserve(lex, "float", BASIC);
     lexer_reserve(lex, "return", RETURN);
+
+    lexer_reserve(lex, "struct", STRUCT);
 }
 
 static int readch_match(struct lexer *lex, char c)
@@ -215,44 +215,29 @@ struct lexer_token *lexer_scan(struct lexer *lex)
             readch(lex);
         } while (isdigit((unsigned char)lex->peek));
 
-        if (lex->peek != '.')
-            return new_lexer_token_num(v);
-
-        float x = (float)v;
-        float d = 10.0f;
-
-        for (;;) {
-            readch(lex);
-            if (!isdigit((unsigned char)lex->peek)) break;
-            x += (float)(lex->peek - '0') / d;
-            d *= 10.0f;
-        }
-
-        return new_lexer_token_real(x);
+        return new_lexer_token_num(v);
     }
 
-    if (isalpha((unsigned char)lex->peek)) {
+    if (isalpha((unsigned char)lex->peek) || lex->peek == '_') {
         char buf[256];
         int i = 0;
 
         do {
-            if (i < (int)sizeof(buf) - 1)
+            if (i < 255)
                 buf[i++] = lex->peek;
             readch(lex);
-        } while (isalnum((unsigned char)lex->peek));
+        } while (isalnum((unsigned char)lex->peek) || lex->peek == '_');
 
         buf[i] = '\0';
 
-        struct lexer_token *w = hashmap_get(&lex->words, buf);
-        if (w != NULL)
-            return w;
+        int tag = (int)(intptr_t)hashmap_get(&lex->words, buf);
+        if (tag != 0)
+            return new_lexer_token_word(buf, tag);
 
-        w = new_lexer_token_word(buf, ID);
-        hashmap_put(&lex->words, w->lexeme, w);
-        return w;
+        return new_lexer_token_word(buf, ID);
     }
 
-    struct lexer_token *tok = new_lexer_token_char(lex->peek, lex->peek);
-    lex->peek = ' ';
-    return tok;
+    char ch = lex->peek;
+    readch(lex);
+    return new_lexer_token_char(ch, ch);
 }

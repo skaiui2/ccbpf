@@ -44,6 +44,11 @@ struct StructType {
     struct hashmap fields;
 };
 
+struct StructFieldInfo {
+    int offset;          // 字段在 struct 内的偏移
+    struct Type *type;   // 字段类型
+};
+
 struct EnumType {
     struct Type base;
     struct hashmap values;

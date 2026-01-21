@@ -22,6 +22,10 @@ enum NodeTag {
     TAG_REL,
     TAG_LOGICAL,
 
+    TAG_RETURN,
+    TAG_CTX, 
+    TAG_PKT,
+
     /* 语句节点 */
     TAG_SET,
     TAG_SETELEM,
@@ -48,6 +52,8 @@ int          node_newlabel(void);
 void         node_emitlabel(int i);
 void         node_emit(const char *fmt, ...);
 
+
+
 /* ===== Expr ===== */
 
 struct Expr {
@@ -57,7 +63,27 @@ struct Expr {
     int temp_no;
 };
 
+struct Expr *ctx_load_expr_new(int offset);
+
 struct Expr *expr_new(struct lexer_token *tok, struct Type *type);
+
+
+/* ========= ctx ==========*/
+struct CtxExpr {
+    struct Expr base;
+    int offset;   // ctx 中的字节偏移
+};
+
+struct Expr *ctx_load_expr_new(int offset);
+
+/* ===== PktIndex ===== */
+struct PktIndex {
+    struct Expr base;
+    struct Expr *index;
+};
+
+struct Expr *pkt_index_new(struct Expr *index);
+
 
 /* ===== Stmt ===== */
 
@@ -70,6 +96,16 @@ extern struct Stmt *Stmt_Null;
 extern struct Stmt *Stmt_Enclosing;
 
 struct Stmt *stmt_new(void);
+
+
+/* ===== Return ===== */
+struct Return {
+    struct Stmt base;
+    struct Expr *expr;
+};
+
+struct Return *return_new(struct Expr *expr);
+
 
 /* ===== Op ===== */
 
@@ -204,6 +240,7 @@ struct For *for_new(struct Stmt *init, struct Expr *cond, struct Stmt *step, str
 struct Id {
     struct Expr base;
     int         offset;
+    int base_offset;
 };
 
 struct Id *id_new(struct lexer_token *word, struct Type *type, int offset);
