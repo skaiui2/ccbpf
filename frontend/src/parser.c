@@ -55,6 +55,7 @@ char *token_to_string(struct lexer_token *tok)
     case SUB_ASSIGN: return strdup("-=");
     case MUL_ASSIGN: return strdup("*=");
     case DIV_ASSIGN: return strdup("/=");
+    case ARROW:      return strdup("->");
     case INC:        return strdup("++");
     case DEC:        return strdup("--");
     case EQ:         return strdup("==");
@@ -202,6 +203,52 @@ static void parser_struct_decl(struct Parser *p)
     env_put_type(p->top, name, (struct Type *)st);
 }
 
+struct Access *parser_field(struct Parser *p, struct Expr *base, struct lexer_token *field_tok)
+{
+    /* ===== pkt_ptr->field ===== */
+    if (base->base.tag == TAG_PKT_PTR) {
+        struct PktPtrExpr *pp = (struct PktPtrExpr *)base;
+
+        if (!pp->st)
+            parser_error(p, "pkt pointer has no struct type (missing cast)");
+
+        struct StructFieldInfo *fi = hashmap_get(&pp->st->fields, field_tok->lexeme);
+        if (!fi)
+            parser_error(p, "unknown field in struct");
+
+        /* 计算最终 offset = base_offset + field_offset */
+        int final_offset = pp->base_offset + fi->offset;
+
+        /* 构造一个 Constant 表达式，表示这个 offset */
+        struct Constant *c = constant_int(final_offset);
+        return (struct Access *)pkt_index_new((struct Expr *)c, fi->type->width);
+    }
+
+    struct Type *t = base->type;
+
+    if (t->tag != TYPE_PTR)
+        parser_error(p, "base of '->' must be pointer");
+
+    struct PtrType *pt = (struct PtrType *)t;
+    if (pt->to->tag != TYPE_STRUCT)
+        parser_error(p, "base of '->' must point to struct");
+
+    struct StructType *st = (struct StructType *)pt->to;
+
+    struct StructFieldInfo *fi = hashmap_get(&st->fields, field_tok->lexeme);
+    if (!fi)
+        parser_error(p, "unknown field in struct");
+
+    struct Constant *zero = constant_int(0);
+
+    struct Access *acc = access_new(base, (struct Expr *)zero, fi->type);
+    acc->slot  = fi->offset;
+    acc->width = fi->type->width;
+
+    return acc;
+}
+
+
 void parser_program(struct Parser *p)
 {
     while (p->look->tag == STRUCT) {
@@ -319,24 +366,47 @@ void parser_decls(struct Parser *p)
         }
     }
 }
-
-
 struct Type *parser_type(struct Parser *p)
 {
-    if (p->look->tag != BASIC)
-        parser_error(p, "type expected");
+    /* BASIC 类型 */
+    if (p->look->tag == BASIC) {
+        struct Type *tp = basic_type_from_token(p->look);
+        parser_match(p, BASIC);
 
-    struct Type *tp = basic_type_from_token(p->look);
-    if (!tp)
-        parser_error(p, "unknown basic type");
+        /* 指针层级 */
+        while (p->look->tag == STAR) {
+            parser_match(p, STAR);
+            tp = (struct Type *)ptr_new(tp);
+        }
 
-    parser_match(p, BASIC);
-
-    if (p->look->tag != LBRACKET)
         return tp;
+    }
 
-    return parser_dims(p, tp);
+    /* struct 类型 */
+    if (p->look->tag == STRUCT) {
+        parser_match(p, STRUCT);
+
+        if (p->look->tag != ID)
+            parser_error(p, "expected struct name");
+
+        struct Type *tp = env_get_type(p->top, p->look->lexeme);
+        if (!tp || tp->tag != TYPE_STRUCT)
+            parser_error(p, "unknown struct type");
+
+        parser_match(p, ID);
+
+        /* 指针层级 */
+        while (p->look->tag == STAR) {
+            parser_match(p, STAR);
+            tp = (struct Type *)ptr_new(tp);
+        }
+
+        return tp;
+    }
+
+    return NULL; /* 不是类型 */
 }
+
 
 struct Type *parser_dims(struct Parser *p, struct Type *base)
 {
@@ -603,8 +673,58 @@ struct Expr *parser_term(struct Parser *p)
     return x;
 }
 
+
+struct Expr *parser_postfix(struct Parser *p)
+{
+    struct Expr *e = parser_factor(p);
+
+    for (;;) {
+        if (p->look->tag == LBRACKET) {
+            e = (struct Expr *)parser_offset(p, (struct Id *)e);
+        }
+        else if (p->look->tag == ARROW) {
+            parser_match(p, ARROW);
+
+            if (p->look->tag != ID || !p->look->lexeme)
+                parser_error(p, "expected field name after '->'");
+
+            struct lexer_token *field_tok = p->look;
+            parser_match(p, ID);
+
+            e = (struct Expr *)parser_field(p, e, field_tok);
+        }
+        else {
+            break;
+        }
+    }
+
+    return e;
+}
+
 struct Expr *parser_unary(struct Parser *p)
 {
+    if (p->look->tag == AND_BIT) {        // '&'
+    parser_move(p);              
+
+    struct Expr *e = parser_unary(p);   // 解析后面的表达式
+
+    // ★ 只支持 &pkt[常量]
+    if (e->base.tag == TAG_PKT) {
+        struct PktIndex *pi = (struct PktIndex *)e;
+
+        // index 必须是常量
+        if (pi->index->base.tag != TAG_CONSTANT)
+            parser_error(p, "pkt[] index must be constant for pointer");
+
+        int offset = ((struct Constant *)pi->index)->int_val;
+
+        // 构造 pkt_ptr 节点（struct type 先为 NULL）
+        return pkt_ptr_new(offset, NULL);
+    }
+
+    parser_error(p, "unsupported &expr (only &pkt[const] allowed)");
+    }
+
     if (p->look->tag == MINUS) {
         struct lexer_token *tok = p->look;
         parser_move(p);
@@ -614,19 +734,51 @@ struct Expr *parser_unary(struct Parser *p)
         parser_move(p);
         return (struct Expr *)not_new(tok, parser_unary(p));
     }
-    return parser_factor(p);
+    return parser_postfix(p);
 }
+
+
 
 struct Expr *parser_factor(struct Parser *p)
 {
     struct Expr *x = NULL;
 
     switch (p->look->tag) {
-    case LPAREN:
-        parser_move(p);
-        x = parser_bool(p);
+    case LPAREN: {
+    parser_move(p);  // '('
+
+    struct Type *ty = parser_type(p);
+    if (ty != NULL) {
+        // cast
         parser_match(p, RPAREN);
-        return x;
+        struct Expr *e = parser_unary(p);
+
+        // 如果是 pkt_ptr，则设置结构体类型
+        if (e->base.tag == TAG_PKT_PTR) {
+            struct PktPtrExpr *pp = (struct PktPtrExpr *)e;
+
+            if (ty->tag == TYPE_PTR) {
+                struct PtrType *pt = (struct PtrType *)ty;
+
+                if (pt->to->tag == TYPE_STRUCT) {
+                    pp->st = (struct StructType *)pt->to;
+                    pp->base.type = ty;
+                    return e;
+                }
+            }
+            parser_error(p, "unsupported cast on pkt pointer");
+    }
+
+        // 普通 cast（最小实现）
+        e->type = ty;
+        return e;
+    }
+
+    // 否则是普通分组表达式
+    struct Expr *x = parser_bool(p);
+    parser_match(p, RPAREN);
+    return x;
+    }
 
     case NUM:
         x = (struct Expr *)constant_int(p->look->int_val);
@@ -665,7 +817,7 @@ struct Expr *parser_factor(struct Parser *p)
 
             parser_match(p, RBRACKET);
 
-            return (struct Expr *)pkt_index_new(idx);
+            return (struct Expr *)pkt_index_new(idx, 1);
         }
 
         // ctx->arg0 / ctx->arg1
@@ -673,37 +825,33 @@ struct Expr *parser_factor(struct Parser *p)
             // 消费 "ctx"
             parser_move(p);
 
-        if (p->look->tag != DOT)
-            parser_error(p, "expected '.' after ctx");
+            if (p->look->tag != DOT)
+                parser_error(p, "expected '.' after ctx");
 
-            parser_move(p); // 消费 '.'
+                parser_move(p); // 消费 '.'
 
-            if (p->look->tag != ID || !p->look->lexeme)
-            parser_error(p, "expected member name after ctx.");
+                if (p->look->tag != ID || !p->look->lexeme)
+                parser_error(p, "expected member name after ctx.");
 
-            int offset = -1;
-            if (strcmp(p->look->lexeme, "arg0") == 0)
-                offset = 0;
-            else if (strcmp(p->look->lexeme, "arg1") == 0)
-                offset = 4;
+                int offset = -1;
+                if (strcmp(p->look->lexeme, "arg0") == 0)
+                    offset = 0;
+                else if (strcmp(p->look->lexeme, "arg1") == 0)
+                    offset = 4;
 
-            if (offset < 0)
-                parser_error(p, "unsupported ctx member (only arg0/arg1 supported)");
+                if (offset < 0)
+                    parser_error(p, "unsupported ctx member (only arg0/arg1 supported)");
 
-            parser_move(p); // 消费 "arg0"/"arg1"
+                parser_move(p); 
 
-            // 调用 inter.c 里的构造函数
-            return (struct Expr *)ctx_load_expr_new(offset);
+                return (struct Expr *)ctx_load_expr_new(offset);
         }
 
-        // 普通变量 / 数组
         struct Id *id = env_get_var(p->top, p->look->lexeme);
         if (!id)
             parser_error(p, "undeclared id");
         parser_move(p);
-        if (p->look->tag != LBRACKET)
-            return (struct Expr *)id;
-        return (struct Expr *)parser_offset(p, id);
+        return (struct Expr *)id;
     }
 
 
@@ -712,6 +860,8 @@ struct Expr *parser_factor(struct Parser *p)
         return NULL;
     }
 }
+
+
 
 static struct lexer_token TOK_MUL  = { STAR,  0, .lexeme = "*" };
 static struct lexer_token TOK_PLUS = { PLUS,  0, .lexeme = "+" };

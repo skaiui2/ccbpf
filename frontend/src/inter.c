@@ -28,6 +28,11 @@ static inline int is_pkt(struct Node *n) {
     return n->tag == TAG_PKT; 
 }
 
+static inline int is_pkt_ptr(struct Node *n)
+{
+    return n->tag == TAG_PKT_PTR;
+}
+
 static inline int is_access(struct Node *n) {
     return n->tag == TAG_ACCESS;
 }
@@ -183,11 +188,17 @@ static struct Node *expr_gen(struct Node *self)
         ir.op   = IR_LOAD_PKT;
         ir.dst  = e->temp_no;
         ir.src1 = offset;   /* 用 src1 存 offset */
-        ir.src2 = 1;        /* size = 1 字节，先固定 */
+        ir.src2 = p->width;        /* size = 1 字节，先固定 */
 
         ir_emit(ir);
         return self;
     }
+
+    if (is_pkt_ptr(self)) {
+        // pkt 指针本身不生成 IR，只在 field 访问时用
+        return self;
+    }
+
 
     if (is_ctx(self)) { 
         struct CtxExpr *c = (struct CtxExpr *)self; 
@@ -407,7 +418,7 @@ static char *pkt_tostring(struct Node *self)
     return buf;
 }
 
-struct Expr *pkt_index_new(struct Expr *index)
+struct Expr *pkt_index_new(struct Expr *index, int width)
 {
     struct PktIndex *n = malloc(sizeof(*n));
     n->base.base.tag      = TAG_PKT;
@@ -419,9 +430,40 @@ struct Expr *pkt_index_new(struct Expr *index)
     n->base.type     = Type_Int;
     n->base.temp_no  = 0;
     n->index         = index;
+    n->width = width;
+
     return (struct Expr *)n;
 }
 
+/* ===== PktPtrExpr ===== */
+static char *pkt_ptr_tostring(struct Node *self)
+{
+    struct PktPtrExpr *p = (struct PktPtrExpr *)self;
+
+    // 简单一点：pkt_ptr@<offset>
+    char *buf = malloc(32);
+    snprintf(buf, 32, "pkt_ptr@%d", p->base_offset);
+    return buf;
+}
+
+struct Expr *pkt_ptr_new(int base_offset, struct StructType *st)
+{
+    struct PktPtrExpr *n = malloc(sizeof(*n));
+
+    n->base.base.tag      = TAG_PKT_PTR;
+    n->base.base.gen      = (void *)expr_gen;
+    n->base.base.jumping  = expr_jumping;
+    n->base.base.tostring = pkt_ptr_tostring;
+
+    n->base.op       = NULL;
+    n->base.type     = NULL;          // 之后在 cast 里填成 struct udp_hdr*
+    n->base.temp_no  = 0;
+
+    n->base_offset   = base_offset;
+    n->st            = st;
+
+    return (struct Expr *)n;
+}
 
 /* ============================================================
  *  Stmt

@@ -61,26 +61,12 @@ void bpf_vm_code_test()
 
     u_int result = bpf_filter(prog, dummy, sizeof(dummy), sizeof(dummy));
 
-    printf("BPF sum result: %u\n", result); // 预期：150
+    printf("BPF sum result: %u\n", result); // 150
 }
 
-
-/* ===== 清空 IR 池 ===== */
-extern struct IR *ir_head;
-extern struct IR *ir_tail;
-extern int ir_count;   // 你需要在 ir.c 里把 ir_count 改成非 static
-
-static void ir_reset(void)
-{
-    ir_head = NULL;
-    ir_tail = NULL;
-    ir_count = 0;
-}
-
-/* ===== 编译 hello.c → out.ccbpf ===== */
 int compiler_test(void)
 {
-    ir_reset();   // ★ 清空旧 IR
+    ir_init();  
 
     const char *filename = "../hello.c";
 
@@ -94,22 +80,18 @@ int compiler_test(void)
         return 1;
     }
 
-    /* 1. 解析 + 生成 IR */
+    /* parser and generate IR*/
     parser_program(p);
 
-    /* 2. IR → BPF */
+    /* IR -> BPF */
     struct bpf_builder b;
     bpf_builder_init(&b);
 
-    int label_count = 0;
-    for (struct IR *x = ir_head; x; x = x->next)
-        if (x->label > label_count)
-            label_count = x->label;
-    label_count++;
+    struct ir_mes im;
+    ir_mes_get(&im);
 
-    ir_lower_program(ir_head, label_count, &b);
+    ir_lower_program(im.ir_head, im.label_count, &b);
 
-    /* 3. 写出 out.ccbpf */
     struct bpf_insn *prog = bpf_builder_data(&b);
     int prog_len = bpf_builder_count(&b);
 
@@ -120,7 +102,6 @@ int compiler_test(void)
     return 0;
 }
 
-/* ===== hook 测试 ===== */
 int test_add(int a, int b)
 {
     struct hook_ctx ctx = {
@@ -139,26 +120,27 @@ int test_add(int a, int b)
 
 int test_pkt(uint8_t *packet, int len)
 {
-    struct hook_ctx ctx = { .arg0 = 0, .arg1 = 0 };
-
     struct ccbpf_program prog = ccbpf_load("out.ccbpf");
 
-    uint32_t r = ccbpf_run_ctx(&prog, packet, len);
+    uint32_t r = ccbpf_run_pkt(&prog, packet, len);
 
     ccbpf_unload(&prog);
 
     return r;
 }
 
-/* ===== main ===== */
 int main(void)
 {
-    compiler_test();   // 编译 hello.c → out.ccbpf
+    compiler_test();  
     
     uint8_t buf[64] = {0};
-    buf[23] = 6;   // TCP
 
-    printf("result = %d\n", test_pkt(buf, 64));   // expect PASS
+    buf[34] = 0;
+    buf[35] = 0;
+    buf[36] = 0;
+    buf[37] = 1;
+
+    printf("result = %d\n", test_pkt(buf, 64));  
 
 
     return 0;

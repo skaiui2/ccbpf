@@ -178,8 +178,18 @@ struct lexer_token *lexer_scan(struct lexer *lex)
             return new_lexer_token_char(PLUS, '+');
 
         case '-':
-            if (readch_match(lex, '-')) return new_lexer_token_char(DEC, '-');
-            if (lex->peek == '=') return new_lexer_token_char(SUB_ASSIGN, '-');
+            readch(lex); 
+            if (lex->peek == '-') {
+                readch(lex);
+                return new_lexer_token_char(DEC, '-');
+            } else if (lex->peek == '=') {
+                readch(lex);
+                return new_lexer_token_char(SUB_ASSIGN, '-');
+            } else if (lex->peek == '>') {
+                readch(lex);
+                return new_lexer_token_char(ARROW, '-');
+            }
+
             return new_lexer_token_char(MINUS, '-');
 
         case '*':
@@ -208,6 +218,24 @@ struct lexer_token *lexer_scan(struct lexer *lex)
 
     }
 
+    if (lex->peek == '0') {
+        readch(lex);
+        if (lex->peek == 'x' || lex->peek == 'X') {
+            readch(lex);
+            int v = 0;
+            while (isxdigit(lex->peek)) {
+                char c = lex->peek;
+                readch(lex);
+
+                if (c >= '0' && c <= '9') v = v * 16 + (c - '0');
+                else if (c >= 'a' && c <= 'f') v = v * 16 + (c - 'a' + 10);
+                else if (c >= 'A' && c <= 'F') v = v * 16 + (c - 'A' + 10);
+            }
+            return new_lexer_token_num(v);
+        }
+        return new_lexer_token_num(0);
+    }
+
     if (isdigit((unsigned char)lex->peek)) {
         int v = 0;
         do {
@@ -215,7 +243,20 @@ struct lexer_token *lexer_scan(struct lexer *lex)
             readch(lex);
         } while (isdigit((unsigned char)lex->peek));
 
-        return new_lexer_token_num(v);
+        if (lex->peek != '.')
+            return new_lexer_token_num(v);
+
+        float x = (float)v;
+        float d = 10.0f;
+
+        for (;;) {
+            readch(lex);
+            if (!isdigit((unsigned char)lex->peek)) break;
+            x += (float)(lex->peek - '0') / d;
+            d *= 10.0f;
+        }
+
+        return new_lexer_token_real(x);
     }
 
     if (isalpha((unsigned char)lex->peek) || lex->peek == '_') {

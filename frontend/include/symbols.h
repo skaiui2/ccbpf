@@ -45,8 +45,8 @@ struct StructType {
 };
 
 struct StructFieldInfo {
-    int offset;          // 字段在 struct 内的偏移
-    struct Type *type;   // 字段类型
+    int offset;         
+    struct Type *type; 
 };
 
 struct EnumType {

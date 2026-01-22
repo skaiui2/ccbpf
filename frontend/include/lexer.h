@@ -27,6 +27,7 @@ enum tag {
     TEMP,
     TRUE,
     WHILE,
+    ARROW,
 
     NOT,
     // function / block symbols

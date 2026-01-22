@@ -60,11 +60,13 @@ struct IR {
     struct IR *next;
 };
 
+struct ir_mes {
+    int label_count;
+    struct IR *ir_head;
+};
 
-
-extern struct IR *ir_head;
-extern struct IR *ir_tail;
-
+void ir_init(void);
+void ir_mes_get(struct ir_mes *im);
 void ir_emit(struct IR ir);
 void ir_parse_and_emit(const char *fmt, va_list ap);
 

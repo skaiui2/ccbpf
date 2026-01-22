@@ -11,6 +11,25 @@ int ir_count = 0;
 struct IR *ir_head = NULL;
 struct IR *ir_tail = NULL;
 
+
+void ir_init(void)
+{
+    ir_head = NULL;
+    ir_tail = NULL;
+    ir_count = 0;
+}
+
+void ir_mes_get(struct ir_mes *im)
+{
+    int label_count = 0;
+    for (struct IR *x = ir_head; x; x = x->next)
+        if (x->label > label_count)
+            label_count = x->label;
+    label_count++;
+    im->ir_head = ir_head;
+    im->label_count = label_count;
+}
+
 void ir_emit(struct IR ir)
 {
     if (ir_count >= IR_POOL_SIZE) {

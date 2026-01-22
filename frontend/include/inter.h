@@ -25,6 +25,7 @@ enum NodeTag {
     TAG_RETURN,
     TAG_CTX, 
     TAG_PKT,
+    TAG_PKT_PTR,
 
     /* 语句节点 */
     TAG_SET,
@@ -80,10 +81,19 @@ struct Expr *ctx_load_expr_new(int offset);
 struct PktIndex {
     struct Expr base;
     struct Expr *index;
+    int width;
 };
 
-struct Expr *pkt_index_new(struct Expr *index);
+struct Expr *pkt_index_new(struct Expr *index, int width);
 
+/* ===== PktPtrExpr =======*/
+struct PktPtrExpr {
+    struct Expr base;
+    int base_offset;            
+    struct StructType *st;        
+};
+
+struct Expr *pkt_ptr_new(int base_offset, struct StructType *st);
 
 /* ===== Stmt ===== */
 
