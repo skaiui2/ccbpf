@@ -3,6 +3,15 @@
 
 #include <stdint.h>
 
+
+enum {
+    NATIVE_NTOHL = 1,
+    NATIVE_NTOHS = 2,
+    NATIVE_PRINTF = 3,
+};
+
+
+
 /*
  * BSD-style integer aliases
  * These match the semantics of u_int, u_char, etc.

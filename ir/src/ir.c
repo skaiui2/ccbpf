@@ -78,6 +78,12 @@ void ir_emit(struct IR ir)
         printf("[IR] LOAD_CTX t%d <- CTX[%d]\n", ir.dst, ir.src1);
         break;
 
+    case IR_NATIVE_CALL:
+        printf("[IR] NATIVE_CALL func=%d dst=t%d argc=%d (args: t%d ...)\n",
+                ir.func_id, ir.dst, ir.argc,
+                ir.argc > 0 ? ir.args[0] : -1);
+        break;
+
     case IR_LOAD:
         printf("[IR] LOAD  t%d <- MEM[%d + t%d * %d]\n",
                ir.dst, ir.array_base, ir.array_index, ir.array_width);

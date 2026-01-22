@@ -42,6 +42,8 @@
  */
 
 #include "cbpf.h"
+#include <arpa/inet.h>
+#include <stdio.h>
 
 #define BPF_ALIGN
 
@@ -294,6 +296,21 @@ u_int bpf_filter(register struct bpf_insn *pc, register u_char *p, u_int wirelen
 
 		case BPF_MISC|BPF_TXA:
 			A = X;
+			continue;
+
+		case BPF_MISC|BPF_COP: 
+			switch (pc->k) { 
+			case NATIVE_NTOHL: 
+				A = ntohl((u_long)A); 
+				break; 
+			case NATIVE_NTOHS: 
+				A = ntohs((u_short)A); 
+				break; 
+			case NATIVE_PRINTF: 
+				printf("%lu\n", (unsigned long)A); 
+				A = 0; 
+				break; 
+			} 
 			continue;
 		}
 	}

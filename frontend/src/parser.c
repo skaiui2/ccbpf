@@ -1,4 +1,5 @@
 #include "parser.h"
+#include "bpf_types.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -506,8 +507,25 @@ struct Stmt *parser_stmt(struct Parser *p)
         parser_match(p, SEMICOLON);
         return (struct Stmt *)return_new(x);
 
-    default:
-        return parser_assign(p);
+    default: {
+    /* 如果是内建函数开头：ntohl/ntohs/print，直接当表达式语句处理 */
+    if (p->look->tag == ID && p->look->lexeme) {
+        const char *name = p->look->lexeme;
+
+        if (strcmp(name, "ntohl") == 0 ||
+            strcmp(name, "ntohs") == 0 ||
+            strcmp(name, "print") == 0) {
+
+            struct Expr *e = parser_bool(p);
+            parser_match(p, SEMICOLON);
+            return (struct Stmt *)e;   /* 你的 Stmt/Expr 体系本来就混用 Node* */
+        }
+    }
+
+    /* 其他情况，按原来的逻辑，当成赋值语句 */
+    return parser_assign(p);
+}
+
     }
 }
 
@@ -753,6 +771,11 @@ struct Expr *parser_factor(struct Parser *p)
         parser_match(p, RPAREN);
         struct Expr *e = parser_unary(p);
 
+        if (e->base.tag == TAG_PKT) { 
+            struct PktIndex *pi = (struct PktIndex *)e;
+            pi->width = ty->width; // int=4, short=2, char=1 
+        }
+
         // 如果是 pkt_ptr，则设置结构体类型
         if (e->base.tag == TAG_PKT_PTR) {
             struct PktPtrExpr *pp = (struct PktPtrExpr *)e;
@@ -803,6 +826,31 @@ struct Expr *parser_factor(struct Parser *p)
     case ID: {
         if (!p->look->lexeme)
             parser_error(p, "identifier without lexeme");
+
+                /* ===== Builtin calls: ntohl(x), ntohs(x), print(x) ===== */
+        if (strcmp(p->look->lexeme, "ntohl") == 0) {
+            parser_move(p); // consume "ntohl"
+            parser_match(p, LPAREN);
+            struct Expr *arg = parser_bool(p);
+            parser_match(p, RPAREN);
+            return builtin_call_new(NATIVE_NTOHL, arg);
+        }
+
+        if (strcmp(p->look->lexeme, "ntohs") == 0) {
+            parser_move(p); // consume "ntohs"
+            parser_match(p, LPAREN);
+            struct Expr *arg = parser_bool(p);
+            parser_match(p, RPAREN);
+            return builtin_call_new(NATIVE_NTOHS, arg);
+        }
+
+        if (strcmp(p->look->lexeme, "print") == 0) {
+            parser_move(p); // consume "print"
+            parser_match(p, LPAREN);
+            struct Expr *arg = parser_bool(p);
+            parser_match(p, RPAREN);
+            return builtin_call_new(NATIVE_PRINTF, arg);
+        }
 
                 /* pkt[offset] 语法 */
         if (strcmp(p->look->lexeme, "pkt") == 0) {

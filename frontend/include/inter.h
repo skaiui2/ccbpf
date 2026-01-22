@@ -26,6 +26,7 @@ enum NodeTag {
     TAG_CTX, 
     TAG_PKT,
     TAG_PKT_PTR,
+    TAG_BUILTIN_CALL,
 
     /* 语句节点 */
     TAG_SET,
@@ -68,7 +69,6 @@ struct Expr *ctx_load_expr_new(int offset);
 
 struct Expr *expr_new(struct lexer_token *tok, struct Type *type);
 
-
 /* ========= ctx ==========*/
 struct CtxExpr {
     struct Expr base;
@@ -94,6 +94,17 @@ struct PktPtrExpr {
 };
 
 struct Expr *pkt_ptr_new(int base_offset, struct StructType *st);
+
+
+/* BUILT*/
+struct BuiltinCall {
+    struct Expr base;
+    int func_id;           /* NATIVE_NTOHL / NATIVE_PRINTF  */
+    int argc;
+    struct Expr *args[4];
+};
+
+struct Expr *builtin_call_new(int func_id, struct Expr *arg);
 
 /* ===== Stmt ===== */
 

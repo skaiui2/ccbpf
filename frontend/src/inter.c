@@ -1,5 +1,6 @@
 #include "inter.h"
 #include "ir.h"
+#include "bpf_types.h"
 #include "parser.h"
 #include <stdlib.h>
 #include <stdio.h>
@@ -18,6 +19,11 @@ static int temp_count = 1;
 int new_temp(void) 
 { 
     return temp_count++; 
+}
+
+static int is_builtin_call(struct Node *self)
+{
+    return self->tag == TAG_BUILTIN_CALL;
 }
 
 static inline int is_ctx(struct Node *n) { 
@@ -170,35 +176,91 @@ static struct Node *expr_gen(struct Node *self)
 
     if (e->temp_no == 0)
         e->temp_no = new_temp();
+    /* ===== Builtin calls ===== */
+    if (is_builtin_call(self)) {
+        struct BuiltinCall *b = (struct BuiltinCall *)self;
 
-        /* ===== pkt[index] ===== */
+        /* 1. Generate IR for all argument expressions first */
+        for (int i = 0; i < b->argc; i++) {
+            expr_gen((struct Node *)b->args[i]);
+        }
+
+        /* 
+         * 1.5 Special handling for ntohl(pkt[CONST]):
+         *     If the argument is a pkt[index] expression, the default LOAD_PKT
+         *     generated earlier loads only 1 byte (byte-view).
+         *
+         *     For ntohl, we must load 4 bytes from the same offset.
+         *     We emit a second LOAD_PKT (size=4) into the SAME temp register,
+         *     overriding the previous 1-byte load.
+         *
+         *     This does NOT modify the AST; it only fixes the IR.
+         */
+        if (b->func_id == NATIVE_NTOHL && b->argc == 1) {
+            struct Expr *arg = b->args[0];
+
+            if (arg->base.tag == TAG_PKT) {
+                struct PktIndex *pi = (struct PktIndex *)arg;
+
+                /* Only constant index is supported */
+                if (pi->index->base.tag != TAG_CONSTANT) {
+                    fprintf(stderr, "ntohl(pkt[...]) requires constant index\n");
+                    exit(1);
+                }
+
+                int offset = ((struct Constant *)pi->index)->int_val;
+
+                /* Emit a second LOAD_PKT of size=4 into the same temp */
+                struct IR ir_ld = {0};
+                ir_ld.op   = IR_LOAD_PKT;
+                ir_ld.dst  = arg->temp_no;   /* overwrite previous 1-byte load */
+                ir_ld.src1 = offset;
+                ir_ld.src2 = 4;              /* load 4 bytes */
+
+                ir_emit(ir_ld);
+            }
+        }
+
+        /* 2. Emit IR_NATIVE_CALL */
+        struct IR ir = {0};
+        ir.op      = IR_NATIVE_CALL;
+        ir.dst     = e->temp_no;
+        ir.func_id = b->func_id;
+        ir.argc    = b->argc;
+
+        for (int i = 0; i < b->argc; i++)
+            ir.args[i] = b->args[i]->temp_no;
+
+        ir_emit(ir);
+        return self;
+    }
+
+    /* ===== pkt[index] ===== */
     if (is_pkt(self)) {
         struct PktIndex *p = (struct PktIndex *)self;
 
-        /* 目前只支持常量 index */
+        /* Only constant index supported for MVP */
         if (p->index->base.tag != TAG_CONSTANT) {
             fprintf(stderr, "pkt[] index must be constant for now\n");
             exit(1);
         }
 
-        struct Constant *cidx = (struct Constant *)p->index;
-        int offset = cidx->int_val;
+        int offset = ((struct Constant *)p->index)->int_val;
 
         struct IR ir = {0};
         ir.op   = IR_LOAD_PKT;
         ir.dst  = e->temp_no;
-        ir.src1 = offset;   /* 用 src1 存 offset */
-        ir.src2 = p->width;        /* size = 1 字节，先固定 */
+        ir.src1 = offset;      /* packet offset */
+        ir.src2 = p->width;    /* width determined by parser (1 or cast width) */
 
         ir_emit(ir);
         return self;
     }
 
     if (is_pkt_ptr(self)) {
-        // pkt 指针本身不生成 IR，只在 field 访问时用
+        // only field access use 
         return self;
     }
-
 
     if (is_ctx(self)) { 
         struct CtxExpr *c = (struct CtxExpr *)self; 
@@ -213,7 +275,7 @@ static struct Node *expr_gen(struct Node *self)
     if (is_access(self)) {
         struct Access *acc = (struct Access *)self;
 
-        /* 只支持编译期常量下标：arr[1] 这种 */
+        /* only arr[1]  */
         if (acc->index->base.tag != TAG_CONSTANT) {
             fprintf(stderr, "non-constant array index not supported in MVP\n");
             exit(1);
@@ -226,7 +288,7 @@ static struct Node *expr_gen(struct Node *self)
         struct IR ir = {0};
         ir.op          = IR_LOAD;
         ir.dst         = e->temp_no;
-        ir.array_base  = elem_offset;     /* 直接用元素 offset */
+        ir.array_base  = elem_offset;  
         ir.array_index = 0;           
         ir.array_width = acc->width;    
         ir_emit(ir);
@@ -246,14 +308,13 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-
     if (is_constant(self)) {
         struct Constant *c = (struct Constant *)self;
 
         struct IR ir = {0};
         ir.op   = IR_MOVE;
         ir.dst  = e->temp_no;
-        ir.src1 = c->int_val;   // TODO: support float 
+        ir.src1 = c->int_val; 
         ir_emit(ir);
         return self;
     }
@@ -301,7 +362,7 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== Rel / Logical：由 jumping() 负责，不在这里生成 IR ===== */
+    /* Rel / Logical： by jumping() generate IR, not here ===== */
     return self;
 }
 
@@ -463,6 +524,23 @@ struct Expr *pkt_ptr_new(int base_offset, struct StructType *st)
     n->st            = st;
 
     return (struct Expr *)n;
+}
+
+struct Expr *builtin_call_new(int func_id, struct Expr *arg)
+{
+    struct BuiltinCall *b = malloc(sizeof(*b));
+    memset(b, 0, sizeof(*b));
+
+    b->base.base.tag = TAG_BUILTIN_CALL;
+    b->base.base.gen = (void *)expr_gen;
+    b->base.base.jumping = expr_jumping;
+    b->base.base.tostring = expr_tostring;
+
+    b->func_id = func_id;
+    b->argc = 1;
+    b->args[0] = arg;
+
+    return (struct Expr *)b;
 }
 
 /* ============================================================

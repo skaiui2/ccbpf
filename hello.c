@@ -4,5 +4,8 @@ struct udp_hdr {
 };
 
 int hook(void *ctx, char *pkt) {
-    return ((struct udp_hdr *)&pkt[34])->sport;
+    int x;
+    x = ntohl(pkt[34]);
+    print(x);
+    return x;
 }

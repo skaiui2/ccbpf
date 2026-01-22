@@ -100,6 +100,9 @@
 #define		BPF_TAX		0x00
 #define		BPF_TXA		0x80
 
+#define BPF_COP  0x40   /* custom operation */
+
+
 /*
  * The instruction data structure.
  */

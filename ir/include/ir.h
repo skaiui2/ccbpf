@@ -33,6 +33,7 @@ enum IR_Op {
     IR_GOTO,
 
     IR_LABEL,
+    IR_NATIVE_CALL,
 };
 
 enum IR_RelOp {
@@ -56,6 +57,10 @@ struct IR {
     enum IR_RelOp relop;
 
     int label;
+
+    int func_id;
+    int argc;    //arg count 
+    int args[4]; //arg temp_no 
 
     struct IR *next;
 };

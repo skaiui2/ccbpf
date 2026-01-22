@@ -86,8 +86,26 @@ void ir_lower_program(struct IR *head, int label_count,
             bpf_builder_emit(b,
                 (struct bpf_insn)BPF_STMT(BPF_ST, dst));
             break;
-            }
+        }
+        
+        case IR_NATIVE_CALL: {
+    int dst_slot  = temp_slot(&layout, ir->dst);
+    int arg0_slot = temp_slot(&layout, ir->args[0]);
 
+    /* A = MEM[arg0_slot] */
+    bpf_builder_emit(b,
+        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
+
+    /* Host-Call: code = BPF_MISC | BPF_COP, k = func_id */
+    bpf_builder_emit(b,
+        (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
+                                  ir->func_id));
+
+    /* A → MEM[dst_slot] */
+    bpf_builder_emit(b,
+        (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
+    break;
+    }
 
 
         case IR_LOAD:

@@ -135,10 +135,10 @@ int main(void)
     
     uint8_t buf[64] = {0};
 
-    buf[34] = 0;
+    buf[34] = 254;
     buf[35] = 0;
     buf[36] = 0;
-    buf[37] = 1;
+    buf[37] = 0;
 
     printf("result = %d\n", test_pkt(buf, 64));  
 
