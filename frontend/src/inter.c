@@ -525,11 +525,10 @@ struct Expr *pkt_ptr_new(int base_offset, struct StructType *st)
     p->base.op      = NULL;
     p->base.temp_no = 0;
 
-    struct PtrType *pt = ptr_new((struct Type *)st);
-    p->base.type = (struct Type *)pt;
+    p->base.type = NULL;
 
     p->base_offset = base_offset;
-    p->st          = st;
+    p->st          = st;  
 
     return (struct Expr *)p;
 }
@@ -1141,6 +1140,8 @@ struct Id *id_new(struct lexer_token *tok, struct Type *type, int offset)
 
     i->base.base.tag = TAG_ID;
     i->base_offset = -1;
+    i->st = NULL;
+
 
     i->base.base.gen      = (void *)expr_gen;
     i->base.base.jumping  = expr_jumping;

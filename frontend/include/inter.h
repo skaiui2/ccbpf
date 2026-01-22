@@ -261,6 +261,7 @@ struct Id {
     struct Expr base;
     int         offset;
     int base_offset;
+    struct StructType *st;
 };
 
 struct Id *id_new(struct lexer_token *word, struct Type *type, int offset);

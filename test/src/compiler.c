@@ -140,6 +140,13 @@ int main(void)
     buf[36] = 0;
     buf[37] = 0;
 
+
+    buf[38] = 0;
+    buf[39] = 0;
+    buf[40] = 1;
+    buf[41] = 0;
+
+
     printf("result = %d\n", test_pkt(buf, 64));  
 
 

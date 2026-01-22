@@ -210,6 +210,23 @@ static void parser_struct_decl(struct Parser *p)
 
 struct Access *parser_field(struct Parser *p, struct Expr *base, struct lexer_token *field_tok)
 {
+    if (base->base.tag == TAG_ID) {
+        struct Id *id = (struct Id *)base;
+
+        if (id->base_offset >= 0 && id->st != NULL) {
+            struct StructFieldInfo *fi = hashmap_get(&id->st->fields, field_tok->lexeme);
+
+            int final_offset = id->base_offset + fi->offset;
+
+            struct Constant *c = constant_int(final_offset);
+            struct Expr *pkt = (struct Expr *)pkt_index_new((struct Expr *)c);
+
+            pkt->type = fi->type;
+
+            return (struct Access *)pkt;
+        }
+    }
+
     /* ===== pkt_ptr->field ===== */
     if (base->base.tag == TAG_PKT_PTR) {
         struct PktPtrExpr *pp = (struct PktPtrExpr *)base;
@@ -224,7 +241,11 @@ struct Access *parser_field(struct Parser *p, struct Expr *base, struct lexer_to
         int final_offset = pp->base_offset + fi->offset;
 
         struct Constant *c = constant_int(final_offset);
-        return (struct Access *)pkt_index_new((struct Expr *)c);
+        struct Expr *pkt = (struct Expr *)pkt_index_new((struct Expr *)c);
+
+        pkt->type = fi->type;
+
+        return (struct Access *)pkt;
     }
 
     struct Type *t = base->type;
@@ -369,6 +390,7 @@ void parser_decls(struct Parser *p)
         }
     }
 }
+
 struct Type *parser_type(struct Parser *p)
 {
     /* BASIC 类型 */
@@ -407,7 +429,7 @@ struct Type *parser_type(struct Parser *p)
         return tp;
     }
 
-    return NULL; /* 不是类型 */
+    return NULL; 
 }
 
 
@@ -510,23 +532,23 @@ struct Stmt *parser_stmt(struct Parser *p)
         return (struct Stmt *)return_new(x);
 
     default: {
-    /* 如果是内建函数开头：ntohl/ntohs/print，直接当表达式语句处理 */
-    if (p->look->tag == ID && p->look->lexeme) {
-        const char *name = p->look->lexeme;
+        /* 如果是内建函数开头：ntohl/ntohs/print，直接当表达式语句处理 */
+        if (p->look->tag == ID && p->look->lexeme) {
+            const char *name = p->look->lexeme;
 
-        if (strcmp(name, "ntohl") == 0 ||
-            strcmp(name, "ntohs") == 0 ||
-            strcmp(name, "print") == 0) {
+            if (strcmp(name, "ntohl") == 0 ||
+                strcmp(name, "ntohs") == 0 ||
+                strcmp(name, "print") == 0) {
 
-            struct Expr *e = parser_bool(p);
-            parser_match(p, SEMICOLON);
-            return (struct Stmt *)e;   /* 你的 Stmt/Expr 体系本来就混用 Node* */
+                struct Expr *e = parser_bool(p);
+                parser_match(p, SEMICOLON);
+                return (struct Stmt *)e;   /* 你的 Stmt/Expr 体系本来就混用 Node* */
+            }
         }
-    }
 
-    /* 其他情况，按原来的逻辑，当成赋值语句 */
-    return parser_assign(p);
-}
+        /* 其他情况，按原来的逻辑，当成赋值语句 */
+        return parser_assign(p);
+    }
 
     }
 }
@@ -550,7 +572,6 @@ struct Stmt *parser_assign(struct Parser *p)
 
         // special-case: uh = (struct T *)&pkt[NUM]; 
         if (p->look->tag == LPAREN) {
-
             parser_match(p, LPAREN);
             parser_match(p, STRUCT);
 
@@ -580,11 +601,19 @@ struct Stmt *parser_assign(struct Parser *p)
             parser_match(p, NUM);
             parser_match(p, RBRACKET);
 
+            /* ★ 查 struct 类型，并填到 id->st */
+            struct Type *tp = env_get_type(p->top, sname);
+            if (!tp || tp->tag != TYPE_STRUCT)
+                parser_error(p, "unknown struct type in pkt pointer assignment");
+
+            id->st = (struct StructType *)tp;
             id->base_offset = base;
+
+            free(sname);
+
             s = (struct Stmt *)set_new(id, NULL);
             goto done;
         }
-
         // normal assignment 
         s = (struct Stmt *)set_new(id, parser_bool(p));
     } else {
