@@ -7,6 +7,8 @@
 extern struct Type     *Type_Int;
 extern struct Type     *Type_Float;
 extern struct Type     *Type_Bool;
+extern struct Type     *Type_Byte;
+extern struct Type     *Type_Short;
 extern struct Constant *Constant_true;
 extern struct Constant *Constant_false;
 
@@ -17,6 +19,8 @@ static struct Type *basic_type_from_token(struct lexer_token *tok)
     if (strcmp(tok->lexeme, "int") == 0)   return Type_Int;
     if (strcmp(tok->lexeme, "float") == 0) return Type_Float;
     if (strcmp(tok->lexeme, "bool") == 0)  return Type_Bool;
+    if (strcmp(tok->lexeme, "char") == 0)  return Type_Byte;
+    if (strcmp(tok->lexeme, "short") == 0)  return Type_Short;
 
     return NULL;
 }
@@ -217,12 +221,10 @@ struct Access *parser_field(struct Parser *p, struct Expr *base, struct lexer_to
         if (!fi)
             parser_error(p, "unknown field in struct");
 
-        /* 计算最终 offset = base_offset + field_offset */
         int final_offset = pp->base_offset + fi->offset;
 
-        /* 构造一个 Constant 表达式，表示这个 offset */
         struct Constant *c = constant_int(final_offset);
-        return (struct Access *)pkt_index_new((struct Expr *)c, fi->type->width);
+        return (struct Access *)pkt_index_new((struct Expr *)c);
     }
 
     struct Type *t = base->type;
@@ -755,52 +757,55 @@ struct Expr *parser_unary(struct Parser *p)
     return parser_postfix(p);
 }
 
-
-
 struct Expr *parser_factor(struct Parser *p)
 {
     struct Expr *x = NULL;
 
     switch (p->look->tag) {
+
     case LPAREN: {
-    parser_move(p);  // '('
+        parser_move(p);  // '('
 
-    struct Type *ty = parser_type(p);
-    if (ty != NULL) {
-        // cast
-        parser_match(p, RPAREN);
-        struct Expr *e = parser_unary(p);
+        struct Type *ty = parser_type(p);
+        if (ty != NULL) {
+            /* cast */
+            parser_match(p, RPAREN);
+            struct Expr *e = parser_unary(p);
 
-        if (e->base.tag == TAG_PKT) { 
-            struct PktIndex *pi = (struct PktIndex *)e;
-            pi->width = ty->width; // int=4, short=2, char=1 
+            /* ===== cast on pkt[index] =====
+             * No width update here.
+             * expr_gen will use e->type->width.
+             */
+            if (e->base.tag == TAG_PKT) {
+                e->type = ty;      /* ★ type-driven width */
+                return e;
+            }
+
+            /* ===== cast on pkt_ptr ===== */
+            if (e->base.tag == TAG_PKT_PTR) {
+                struct PktPtrExpr *pp = (struct PktPtrExpr *)e;
+
+                if (ty->tag == TYPE_PTR) {
+                    struct PtrType *pt = (struct PtrType *)ty;
+
+                    if (pt->to->tag == TYPE_STRUCT) {
+                        pp->st = (struct StructType *)pt->to;
+                        pp->base.type = ty;
+                        return e;
+                    }
+                }
+                parser_error(p, "unsupported cast on pkt pointer");
+            }
+
+            /* ===== normal cast ===== */
+            e->type = ty;
+            return e;
         }
 
-        // 如果是 pkt_ptr，则设置结构体类型
-        if (e->base.tag == TAG_PKT_PTR) {
-            struct PktPtrExpr *pp = (struct PktPtrExpr *)e;
-
-            if (ty->tag == TYPE_PTR) {
-                struct PtrType *pt = (struct PtrType *)ty;
-
-                if (pt->to->tag == TYPE_STRUCT) {
-                    pp->st = (struct StructType *)pt->to;
-                    pp->base.type = ty;
-                    return e;
-                }
-            }
-            parser_error(p, "unsupported cast on pkt pointer");
-    }
-
-        // 普通 cast（最小实现）
-        e->type = ty;
-        return e;
-    }
-
-    // 否则是普通分组表达式
-    struct Expr *x = parser_bool(p);
-    parser_match(p, RPAREN);
-    return x;
+        /* grouped expression */
+        struct Expr *x = parser_bool(p);
+        parser_match(p, RPAREN);
+        return x;
     }
 
     case NUM:
@@ -827,89 +832,88 @@ struct Expr *parser_factor(struct Parser *p)
         if (!p->look->lexeme)
             parser_error(p, "identifier without lexeme");
 
-                /* ===== Builtin calls: ntohl(x), ntohs(x), print(x) ===== */
+        /* ===== Builtin calls ===== */
         if (strcmp(p->look->lexeme, "ntohl") == 0) {
-            parser_move(p); // consume "ntohl"
+            parser_move(p);
             parser_match(p, LPAREN);
             struct Expr *arg = parser_bool(p);
             parser_match(p, RPAREN);
-            return builtin_call_new(NATIVE_NTOHL, arg);
+            return (struct Expr *)builtin_call_new(NATIVE_NTOHL, arg);
         }
 
         if (strcmp(p->look->lexeme, "ntohs") == 0) {
-            parser_move(p); // consume "ntohs"
+            parser_move(p);
             parser_match(p, LPAREN);
             struct Expr *arg = parser_bool(p);
             parser_match(p, RPAREN);
-            return builtin_call_new(NATIVE_NTOHS, arg);
+            return (struct Expr *)builtin_call_new(NATIVE_NTOHS, arg);
         }
 
         if (strcmp(p->look->lexeme, "print") == 0) {
-            parser_move(p); // consume "print"
+            parser_move(p);
             parser_match(p, LPAREN);
             struct Expr *arg = parser_bool(p);
             parser_match(p, RPAREN);
-            return builtin_call_new(NATIVE_PRINTF, arg);
+            return (struct Expr *)builtin_call_new(NATIVE_PRINTF, arg);
         }
 
-                /* pkt[offset] 语法 */
+        /* ===== pkt[index] ===== */
         if (strcmp(p->look->lexeme, "pkt") == 0) {
-            parser_move(p);  // 消费 "pkt"
+            parser_move(p);
 
             if (p->look->tag != LBRACKET)
                 parser_error(p, "expected '[' after pkt");
 
-            parser_move(p);  // 消费 '['
+            parser_move(p);  // '['
 
-            struct Expr *idx = parser_bool(p);  // 先允许常量/简单表达式
+            struct Expr *idx = parser_bool(p);
 
             parser_match(p, RBRACKET);
 
-            return (struct Expr *)pkt_index_new(idx, 1);
+            /* pkt_index_new will set default type (byte-view) */
+            return (struct Expr *)pkt_index_new(idx);
         }
 
-        // ctx->arg0 / ctx->arg1
+        /* ===== ctx->arg0 / ctx->arg1 ===== */
         if (strcmp(p->look->lexeme, "ctx") == 0) {
-            // 消费 "ctx"
             parser_move(p);
 
             if (p->look->tag != DOT)
                 parser_error(p, "expected '.' after ctx");
 
-                parser_move(p); // 消费 '.'
+            parser_move(p); // '.'
 
-                if (p->look->tag != ID || !p->look->lexeme)
+            if (p->look->tag != ID || !p->look->lexeme)
                 parser_error(p, "expected member name after ctx.");
 
-                int offset = -1;
-                if (strcmp(p->look->lexeme, "arg0") == 0)
-                    offset = 0;
-                else if (strcmp(p->look->lexeme, "arg1") == 0)
-                    offset = 4;
+            int offset = -1;
+            if (strcmp(p->look->lexeme, "arg0") == 0)
+                offset = 0;
+            else if (strcmp(p->look->lexeme, "arg1") == 0)
+                offset = 4;
 
-                if (offset < 0)
-                    parser_error(p, "unsupported ctx member (only arg0/arg1 supported)");
+            if (offset < 0)
+                parser_error(p, "unsupported ctx member (only arg0/arg1 supported)");
 
-                parser_move(p); 
+            parser_move(p);
 
-                return (struct Expr *)ctx_load_expr_new(offset);
+            return (struct Expr *)ctx_load_expr_new(offset);
         }
 
+        /* ===== identifier ===== */
         struct Id *id = env_get_var(p->top, p->look->lexeme);
         if (!id)
             parser_error(p, "undeclared id");
+
         parser_move(p);
         return (struct Expr *)id;
     }
-
 
     default:
         parser_error(p, "syntax error");
         return NULL;
     }
 }
-
-
 
 static struct lexer_token TOK_MUL  = { STAR,  0, .lexeme = "*" };
 static struct lexer_token TOK_PLUS = { PLUS,  0, .lexeme = "+" };
@@ -920,12 +924,11 @@ struct Access *parser_offset(struct Parser *p, struct Id *a)
     struct Type *type = a->base.type;
 
     parser_match(p, LBRACKET);
-    i = parser_bool(p);          /* 这里的i就是元素索引 */
+    i = parser_bool(p);          //i is index
     parser_match(p, RBRACKET);
 
     struct Array *arr = (struct Array *)type;
     type = arr->of;
 
-    /* 只支持一维数组：直接把i当作index传下去 */
     return access_new((struct Expr *)a, i, type);
 }

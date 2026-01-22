@@ -8,6 +8,7 @@ enum type_tag {
     TYPE_INT,
     TYPE_FLOAT,
     TYPE_CHAR,
+    TYPE_SHORT,
     TYPE_BOOL,
     TYPE_ARRAY,
     TYPE_FUNC,

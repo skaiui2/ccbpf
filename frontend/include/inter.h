@@ -72,7 +72,7 @@ struct Expr *expr_new(struct lexer_token *tok, struct Type *type);
 /* ========= ctx ==========*/
 struct CtxExpr {
     struct Expr base;
-    int offset;   // ctx 中的字节偏移
+    int offset;   // offsete on ctx 
 };
 
 struct Expr *ctx_load_expr_new(int offset);
@@ -81,10 +81,9 @@ struct Expr *ctx_load_expr_new(int offset);
 struct PktIndex {
     struct Expr base;
     struct Expr *index;
-    int width;
 };
 
-struct Expr *pkt_index_new(struct Expr *index, int width);
+struct Expr *pkt_index_new(struct Expr *index);
 
 /* ===== PktPtrExpr =======*/
 struct PktPtrExpr {
@@ -101,10 +100,10 @@ struct BuiltinCall {
     struct Expr base;
     int func_id;           /* NATIVE_NTOHL / NATIVE_PRINTF  */
     int argc;
-    struct Expr *args[4];
+    struct Expr *args[4]; 
 };
 
-struct Expr *builtin_call_new(int func_id, struct Expr *arg);
+struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg);
 
 /* ===== Stmt ===== */
 

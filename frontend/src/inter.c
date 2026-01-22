@@ -6,11 +6,16 @@
 #include <stdio.h>
 #include <string.h>
 #include <stdarg.h>
+#include <stdint.h>
 
 static struct Type TYPE_INT_OBJ   = { TYPE_INT,   4 };
 static struct Type TYPE_FLOAT_OBJ = { TYPE_FLOAT, 8 };
 static struct Type TYPE_BOOL_OBJ  = { TYPE_BOOL,  1 };
+static struct Type TYPE_BYTE_OBJ = { TYPE_CHAR, 1 };
+static struct Type TYPE_SHORT_OBJ = { TYPE_SHORT, 2 };
 
+struct Type *Type_Short = &TYPE_SHORT_OBJ;
+struct Type *Type_Byte = &TYPE_BYTE_OBJ;
 struct Type *Type_Int   = &TYPE_INT_OBJ;
 struct Type *Type_Float = &TYPE_FLOAT_OBJ;
 struct Type *Type_Bool  = &TYPE_BOOL_OBJ;
@@ -176,48 +181,50 @@ static struct Node *expr_gen(struct Node *self)
 
     if (e->temp_no == 0)
         e->temp_no = new_temp();
+
     /* ===== Builtin calls ===== */
     if (is_builtin_call(self)) {
         struct BuiltinCall *b = (struct BuiltinCall *)self;
 
         /* 1. Generate IR for all argument expressions first */
-        for (int i = 0; i < b->argc; i++) {
+        for (int i = 0; i < b->argc; i++)
             expr_gen((struct Node *)b->args[i]);
-        }
 
-        /* 
-         * 1.5 Special handling for ntohl(pkt[CONST]):
-         *     If the argument is a pkt[index] expression, the default LOAD_PKT
-         *     generated earlier loads only 1 byte (byte-view).
+        /*
+         * 1.5 If builtin returns a wider type than pkt[...] loaded,
+         *     override the pkt load width.
          *
-         *     For ntohl, we must load 4 bytes from the same offset.
-         *     We emit a second LOAD_PKT (size=4) into the SAME temp register,
-         *     overriding the previous 1-byte load.
+         *     This is fully type-driven:
+         *       want = builtin return type width
+         *       have = argument expression type width
          *
-         *     This does NOT modify the AST; it only fixes the IR.
+         *     If want > have, emit a second LOAD_PKT into the same temp.
          */
-        if (b->func_id == NATIVE_NTOHL && b->argc == 1) {
+        if (b->argc == 1) {
             struct Expr *arg = b->args[0];
 
             if (arg->base.tag == TAG_PKT) {
-                struct PktIndex *pi = (struct PktIndex *)arg;
+                int want = e->type->width;      /* builtin return width */
+                int have = arg->type->width;    /* pkt[...] default width */
 
-                /* Only constant index is supported */
-                if (pi->index->base.tag != TAG_CONSTANT) {
-                    fprintf(stderr, "ntohl(pkt[...]) requires constant index\n");
-                    exit(1);
+                if (want > have) {
+                    struct PktIndex *pi = (struct PktIndex *)arg;
+
+                    if (pi->index->base.tag != TAG_CONSTANT) {
+                        fprintf(stderr, "pkt[] index must be constant for now\n");
+                        exit(1);
+                    }
+
+                    int offset = ((struct Constant *)pi->index)->int_val;
+
+                    struct IR ir_ld = {0};
+                    ir_ld.op   = IR_LOAD_PKT;
+                    ir_ld.dst  = arg->temp_no;
+                    ir_ld.src1 = offset;
+                    ir_ld.src2 = want;          /* type-driven width */
+
+                    ir_emit(ir_ld);
                 }
-
-                int offset = ((struct Constant *)pi->index)->int_val;
-
-                /* Emit a second LOAD_PKT of size=4 into the same temp */
-                struct IR ir_ld = {0};
-                ir_ld.op   = IR_LOAD_PKT;
-                ir_ld.dst  = arg->temp_no;   /* overwrite previous 1-byte load */
-                ir_ld.src1 = offset;
-                ir_ld.src2 = 4;              /* load 4 bytes */
-
-                ir_emit(ir_ld);
             }
         }
 
@@ -239,7 +246,6 @@ static struct Node *expr_gen(struct Node *self)
     if (is_pkt(self)) {
         struct PktIndex *p = (struct PktIndex *)self;
 
-        /* Only constant index supported for MVP */
         if (p->index->base.tag != TAG_CONSTANT) {
             fprintf(stderr, "pkt[] index must be constant for now\n");
             exit(1);
@@ -250,51 +256,54 @@ static struct Node *expr_gen(struct Node *self)
         struct IR ir = {0};
         ir.op   = IR_LOAD_PKT;
         ir.dst  = e->temp_no;
-        ir.src1 = offset;      /* packet offset */
-        ir.src2 = p->width;    /* width determined by parser (1 or cast width) */
+        ir.src1 = offset;
+
+        /* ★ width is fully type-driven */
+        ir.src2 = e->type->width;
 
         ir_emit(ir);
         return self;
     }
 
+    /* ===== pkt pointer ===== */
     if (is_pkt_ptr(self)) {
-        // only field access use 
         return self;
     }
 
-    if (is_ctx(self)) { 
-        struct CtxExpr *c = (struct CtxExpr *)self; 
-        struct IR ir = {0}; 
-        ir.op = IR_LOAD_CTX; 
-        ir.dst = e->temp_no; 
-        ir.src1 = c->offset; // 0 -> arg0, 4 -> arg1 
-        ir_emit(ir); 
-        return self; 
+    /* ===== ctx ===== */
+    if (is_ctx(self)) {
+        struct CtxExpr *c = (struct CtxExpr *)self;
+        struct IR ir = {0};
+        ir.op   = IR_LOAD_CTX;
+        ir.dst  = e->temp_no;
+        ir.src1 = c->offset;
+        ir_emit(ir);
+        return self;
     }
 
+    /* ===== array access ===== */
     if (is_access(self)) {
         struct Access *acc = (struct Access *)self;
 
-        /* only arr[1]  */
         if (acc->index->base.tag != TAG_CONSTANT) {
             fprintf(stderr, "non-constant array index not supported in MVP\n");
             exit(1);
         }
 
-        struct Constant *cidx = (struct Constant *)acc->index;
-        int idx = cidx->int_val;         
+        int idx = ((struct Constant *)acc->index)->int_val;
         int elem_offset = acc->slot + idx * acc->width;
 
         struct IR ir = {0};
         ir.op          = IR_LOAD;
         ir.dst         = e->temp_no;
-        ir.array_base  = elem_offset;  
-        ir.array_index = 0;           
-        ir.array_width = acc->width;    
+        ir.array_base  = elem_offset;
+        ir.array_index = 0;
+        ir.array_width = acc->width;
         ir_emit(ir);
         return self;
     }
 
+    /* ===== id ===== */
     if (is_id(self)) {
         struct Id *id = (struct Id *)self;
 
@@ -302,24 +311,25 @@ static struct Node *expr_gen(struct Node *self)
         ir.op          = IR_LOAD;
         ir.dst         = e->temp_no;
         ir.array_base  = id->offset;
-        ir.array_index = 0;         
-        ir.array_width = id->base.type->width; 
+        ir.array_index = 0;
+        ir.array_width = id->base.type->width;
         ir_emit(ir);
         return self;
     }
 
+    /* ===== constant ===== */
     if (is_constant(self)) {
         struct Constant *c = (struct Constant *)self;
 
         struct IR ir = {0};
         ir.op   = IR_MOVE;
         ir.dst  = e->temp_no;
-        ir.src1 = c->int_val; 
+        ir.src1 = c->int_val;
         ir_emit(ir);
         return self;
     }
 
-    /* ===== Arith: + - * / ===== */
+    /* ===== arithmetic ===== */
     if (is_arith(self)) {
         struct Arith *a = (struct Arith *)self;
 
@@ -332,7 +342,7 @@ static struct Node *expr_gen(struct Node *self)
         case MINUS: ir.op = IR_SUB; break;
         case STAR:  ir.op = IR_MUL; break;
         case SLASH: ir.op = IR_DIV; break;
-        default:    return self;   
+        default:    return self;
         }
 
         ir.dst  = e->temp_no;
@@ -342,7 +352,7 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== Unary: -x / !x ===== */
+    /* ===== unary ===== */
     if (is_unary(self)) {
         struct Unary *u = (struct Unary *)self;
 
@@ -362,10 +372,9 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* Rel / Logical： by jumping() generate IR, not here ===== */
+    /* Rel / Logical handled by jumping() */
     return self;
 }
-
 
 static void expr_jumping(struct Node *self, int t, int f)
 {
@@ -479,29 +488,26 @@ static char *pkt_tostring(struct Node *self)
     return buf;
 }
 
-struct Expr *pkt_index_new(struct Expr *index, int width)
+struct Expr *pkt_index_new(struct Expr *index)
 {
     struct PktIndex *n = malloc(sizeof(*n));
     n->base.base.tag      = TAG_PKT;
     n->base.base.gen      = (void *)expr_gen;
-    n->base.base.jumping  = expr_jumping;   
+    n->base.base.jumping  = expr_jumping;
     n->base.base.tostring = pkt_tostring;
 
     n->base.op       = NULL;
-    n->base.type     = Type_Int;
     n->base.temp_no  = 0;
-    n->index         = index;
-    n->width = width;
+
+    n->base.type     = Type_Byte;
+    n->index = index;
 
     return (struct Expr *)n;
 }
 
-/* ===== PktPtrExpr ===== */
 static char *pkt_ptr_tostring(struct Node *self)
 {
     struct PktPtrExpr *p = (struct PktPtrExpr *)self;
-
-    // 简单一点：pkt_ptr@<offset>
     char *buf = malloc(32);
     snprintf(buf, 32, "pkt_ptr@%d", p->base_offset);
     return buf;
@@ -509,39 +515,75 @@ static char *pkt_ptr_tostring(struct Node *self)
 
 struct Expr *pkt_ptr_new(int base_offset, struct StructType *st)
 {
-    struct PktPtrExpr *n = malloc(sizeof(*n));
+    struct PktPtrExpr *p = malloc(sizeof(*p));
 
-    n->base.base.tag      = TAG_PKT_PTR;
-    n->base.base.gen      = (void *)expr_gen;
-    n->base.base.jumping  = expr_jumping;
-    n->base.base.tostring = pkt_ptr_tostring;
+    p->base.base.tag      = TAG_PKT_PTR;
+    p->base.base.gen      = (void *)expr_gen;
+    p->base.base.jumping  = expr_jumping;
+    p->base.base.tostring = pkt_ptr_tostring;
 
-    n->base.op       = NULL;
-    n->base.type     = NULL;          // 之后在 cast 里填成 struct udp_hdr*
-    n->base.temp_no  = 0;
+    p->base.op      = NULL;
+    p->base.temp_no = 0;
 
-    n->base_offset   = base_offset;
-    n->st            = st;
+    struct PtrType *pt = ptr_new((struct Type *)st);
+    p->base.type = (struct Type *)pt;
 
-    return (struct Expr *)n;
+    p->base_offset = base_offset;
+    p->st          = st;
+
+    return (struct Expr *)p;
 }
 
-struct Expr *builtin_call_new(int func_id, struct Expr *arg)
+
+/*builtin call*/
+static char *builtin_tostring(struct Node *self)
+{
+    struct BuiltinCall *b = (struct BuiltinCall *)self;
+    char *name = token_to_string(b->base.op);
+    char *arg = b->args[0]->base.tostring((struct Node *)b->args[0]);
+
+    size_t len = strlen(name) + strlen(arg) + 4;
+    char *buf = malloc(len);
+    snprintf(buf, len, "%s(%s)", name, arg);
+
+    free(name);
+    free(arg);
+    return buf;
+}
+
+
+struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
 {
     struct BuiltinCall *b = malloc(sizeof(*b));
-    memset(b, 0, sizeof(*b));
+    b->base.base.tag      = TAG_BUILTIN_CALL;
+    b->base.base.gen      = (void *)expr_gen;
+    b->base.base.jumping  = expr_jumping;
+    b->base.base.tostring = builtin_tostring;
 
-    b->base.base.tag = TAG_BUILTIN_CALL;
-    b->base.base.gen = (void *)expr_gen;
-    b->base.base.jumping = expr_jumping;
-    b->base.base.tostring = expr_tostring;
+    b->base.temp_no = 0;
+
+    b->base.type = Type_Int;   
+
+    struct lexer_token *tok = malloc(sizeof(*tok));
+    tok->tag = ID;
+
+    switch (func_id) {
+    case NATIVE_NTOHL:  tok->lexeme = strdup("ntohl");  break;
+    case NATIVE_NTOHS:  tok->lexeme = strdup("ntohs");  break;
+    case NATIVE_PRINTF: tok->lexeme = strdup("print");  break;
+    default:            tok->lexeme = strdup("builtin"); break;
+    }
+
+    b->base.op = tok;
 
     b->func_id = func_id;
-    b->argc = 1;
+    b->argc    = 1;
     b->args[0] = arg;
 
-    return (struct Expr *)b;
+    return b;
 }
+
+
 
 /* ============================================================
  *  Stmt
