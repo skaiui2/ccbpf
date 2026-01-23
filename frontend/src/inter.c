@@ -31,17 +31,9 @@ static int is_builtin_call(struct Node *self)
     return self->tag == TAG_BUILTIN_CALL;
 }
 
-static inline int is_ctx(struct Node *n) { 
+static inline int is_ctx(struct Node *n) 
+{ 
     return n->tag == TAG_CTX; 
-}
-
-static inline int is_pkt(struct Node *n) { 
-    return n->tag == TAG_PKT; 
-}
-
-static inline int is_pkt_ptr(struct Node *n)
-{
-    return n->tag == TAG_PKT_PTR;
 }
 
 static inline int is_access(struct Node *n) {
@@ -182,53 +174,11 @@ static struct Node *expr_gen(struct Node *self)
     if (e->temp_no == 0)
         e->temp_no = new_temp();
 
-    /* ===== Builtin calls ===== */
     if (is_builtin_call(self)) {
         struct BuiltinCall *b = (struct BuiltinCall *)self;
-
-        /* 1. Generate IR for all argument expressions first */
         for (int i = 0; i < b->argc; i++)
             expr_gen((struct Node *)b->args[i]);
 
-        /*
-         * 1.5 If builtin returns a wider type than pkt[...] loaded,
-         *     override the pkt load width.
-         *
-         *     This is fully type-driven:
-         *       want = builtin return type width
-         *       have = argument expression type width
-         *
-         *     If want > have, emit a second LOAD_PKT into the same temp.
-         */
-        if (b->argc == 1) {
-            struct Expr *arg = b->args[0];
-
-            if (arg->base.tag == TAG_PKT) {
-                int want = e->type->width;      /* builtin return width */
-                int have = arg->type->width;    /* pkt[...] default width */
-
-                if (want > have) {
-                    struct PktIndex *pi = (struct PktIndex *)arg;
-
-                    if (pi->index->base.tag != TAG_CONSTANT) {
-                        fprintf(stderr, "pkt[] index must be constant for now\n");
-                        exit(1);
-                    }
-
-                    int offset = ((struct Constant *)pi->index)->int_val;
-
-                    struct IR ir_ld = {0};
-                    ir_ld.op   = IR_LOAD_PKT;
-                    ir_ld.dst  = arg->temp_no;
-                    ir_ld.src1 = offset;
-                    ir_ld.src2 = want;          /* type-driven width */
-
-                    ir_emit(ir_ld);
-                }
-            }
-        }
-
-        /* 2. Emit IR_NATIVE_CALL */
         struct IR ir = {0};
         ir.op      = IR_NATIVE_CALL;
         ir.dst     = e->temp_no;
@@ -242,34 +192,6 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== pkt[index] ===== */
-    if (is_pkt(self)) {
-        struct PktIndex *p = (struct PktIndex *)self;
-
-        if (p->index->base.tag != TAG_CONSTANT) {
-            fprintf(stderr, "pkt[] index must be constant for now\n");
-            exit(1);
-        }
-
-        int offset = ((struct Constant *)p->index)->int_val;
-
-        struct IR ir = {0};
-        ir.op   = IR_LOAD_PKT;
-        ir.dst  = e->temp_no;
-        ir.src1 = offset;
-
-        /* ★ width is fully type-driven */
-        ir.src2 = e->type->width;
-
-        ir_emit(ir);
-        return self;
-    }
-
-    /* ===== pkt pointer ===== */
-    if (is_pkt_ptr(self)) {
-        return self;
-    }
-
     /* ===== ctx ===== */
     if (is_ctx(self)) {
         struct CtxExpr *c = (struct CtxExpr *)self;
@@ -277,11 +199,13 @@ static struct Node *expr_gen(struct Node *self)
         ir.op   = IR_LOAD_CTX;
         ir.dst  = e->temp_no;
         ir.src1 = c->offset;
+
+        ir.src2 = e->type->width;
+
         ir_emit(ir);
         return self;
     }
 
-    /* ===== array access ===== */
     if (is_access(self)) {
         struct Access *acc = (struct Access *)self;
 
@@ -303,7 +227,6 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== id ===== */
     if (is_id(self)) {
         struct Id *id = (struct Id *)self;
 
@@ -317,7 +240,6 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== constant ===== */
     if (is_constant(self)) {
         struct Constant *c = (struct Constant *)self;
 
@@ -329,7 +251,6 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== arithmetic ===== */
     if (is_arith(self)) {
         struct Arith *a = (struct Arith *)self;
 
@@ -375,6 +296,7 @@ static struct Node *expr_gen(struct Node *self)
     /* Rel / Logical handled by jumping() */
     return self;
 }
+
 
 static void expr_jumping(struct Node *self, int t, int f)
 {
@@ -476,64 +398,6 @@ struct Return *return_new(struct Expr *expr)
     return r;
 }
 
-/*pkt*/
-static char *pkt_tostring(struct Node *self)
-{
-    struct PktIndex *p = (struct PktIndex *)self;
-    char *idx = p->index->base.tostring((struct Node *)p->index);
-
-    size_t len = strlen(idx) + 16;
-    char *buf = malloc(len);
-    snprintf(buf, len, "pkt[%s]", idx);
-    return buf;
-}
-
-struct Expr *pkt_index_new(struct Expr *index)
-{
-    struct PktIndex *n = malloc(sizeof(*n));
-    n->base.base.tag      = TAG_PKT;
-    n->base.base.gen      = (void *)expr_gen;
-    n->base.base.jumping  = expr_jumping;
-    n->base.base.tostring = pkt_tostring;
-
-    n->base.op       = NULL;
-    n->base.temp_no  = 0;
-
-    n->base.type     = Type_Byte;
-    n->index = index;
-
-    return (struct Expr *)n;
-}
-
-static char *pkt_ptr_tostring(struct Node *self)
-{
-    struct PktPtrExpr *p = (struct PktPtrExpr *)self;
-    char *buf = malloc(32);
-    snprintf(buf, 32, "pkt_ptr@%d", p->base_offset);
-    return buf;
-}
-
-struct Expr *pkt_ptr_new(int base_offset, struct StructType *st)
-{
-    struct PktPtrExpr *p = malloc(sizeof(*p));
-
-    p->base.base.tag      = TAG_PKT_PTR;
-    p->base.base.gen      = (void *)expr_gen;
-    p->base.base.jumping  = expr_jumping;
-    p->base.base.tostring = pkt_ptr_tostring;
-
-    p->base.op      = NULL;
-    p->base.temp_no = 0;
-
-    p->base.type = NULL;
-
-    p->base_offset = base_offset;
-    p->st          = st;  
-
-    return (struct Expr *)p;
-}
-
-
 /*builtin call*/
 static char *builtin_tostring(struct Node *self)
 {
@@ -618,6 +482,34 @@ static void init_stmt_singletons(void)
     Stmt_Null      = stmt_new();
     Stmt_Enclosing = Stmt_Null;
 }
+
+static char *ctx_ptr_tostring(struct Node *self)
+{
+    struct CtxPtrExpr *p = (struct CtxPtrExpr *)self;
+    char *buf = malloc(32);
+    snprintf(buf, 32, "&ctx[%d]", p->base_offset);
+    return buf;
+}
+
+struct CtxPtrExpr *ctx_ptr_new(int base_offset, struct Type *ty)
+{
+    struct CtxPtrExpr *p = malloc(sizeof(*p));
+
+    p->base.base.tag      = TAG_CTX_PTR;
+    p->base.base.gen      = (void *)expr_gen;
+    p->base.base.jumping  = expr_jumping;
+    p->base.base.tostring = ctx_ptr_tostring;
+
+    p->base.op      = NULL;
+    p->base.temp_no = 0;
+    p->base.type    = ty;
+
+    p->base_offset = base_offset;
+    p->st          = NULL;
+
+    return p;
+}
+
 
 /* ============================================================
  *  Constant
@@ -1141,25 +1033,44 @@ static char *access_tostring(struct Node *self)
 
 static char *id_tostring(struct Node *self);
 
-struct Id *id_new(struct lexer_token *tok, struct Type *type, int offset)
+struct Id *id_new_from_name(const char *name, struct Type *ty, int offset)
 {
-    struct Id *i = malloc(sizeof(struct Id));
+    struct lexer_token *tok = malloc(sizeof(*tok));
+    if (!tok)
+        printf("out of memory in id_new_from_name");
 
-    i->base.op   = tok;
-    i->base.type = type;
-    i->offset    = offset;
+    memset(tok, 0, sizeof(*tok));
+    tok->tag = ID;
+    tok->lexeme = strdup(name);
+    if (!tok->lexeme)
+        printf("out of memory in id_new_from_name lexeme");
 
-    i->base.base.tag = TAG_ID;
-    i->base_offset = -1;
-    i->st = NULL;
-
-
-    i->base.base.gen      = (void *)expr_gen;
-    i->base.base.jumping  = expr_jumping;
-    i->base.base.tostring = id_tostring;
-
-    return i;
+    return id_new(tok, ty, offset);
 }
+
+struct Id *id_new(struct lexer_token *word, struct Type *type, int offset)
+{
+    struct Id *id = malloc(sizeof(*id));
+
+    id->base.op   = word; 
+    id->base.type = type;
+    id->offset    = offset;
+
+    id->base.base.tag      = TAG_ID;
+    id->base.base.gen      = (void *)expr_gen;
+    id->base.base.jumping  = expr_jumping;
+    id->base.base.tostring = id_tostring;
+
+    id->is_ctx_ptr = 0;
+
+    if (word && word->lexeme) {
+        if (strcmp(word->lexeme, "ctx") == 0)
+            id->is_ctx_ptr = 1;
+    }
+
+    return id;
+}
+
 
 static char *id_tostring(struct Node *self)
 {

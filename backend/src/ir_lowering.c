@@ -29,19 +29,17 @@ void ir_lower_program(struct IR *head, int label_count,
             break;
 
         case IR_RET: {
-            // ir->src1 是虚拟寄存器号 tN
             int slot = temp_slot(&layout, ir->src1);
 
-            // A = MEM[slot]
             bpf_builder_emit(b,
                 (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, slot));
 
-            // return A
             bpf_builder_emit(b,
                 (struct bpf_insn)BPF_STMT(BPF_RET | BPF_A, 0));
             break;
-            }
-        case IR_LOAD_PKT: {
+        }
+
+        case IR_LOAD_CTX: {
             int offset = ir->src1;
             int size   = ir->src2;
             int dst    = temp_slot(&layout, ir->dst);
@@ -49,64 +47,44 @@ void ir_lower_program(struct IR *head, int label_count,
             switch (size) {
             case 1:
                 bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_B | BPF_ABS,
-                                              offset));
+                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_B | BPF_ABS, offset));
                 break;
             case 2:
                 bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_H | BPF_ABS,
-                                              offset));
+                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_H | BPF_ABS, offset));
                 break;
             case 4:
                 bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                                              offset));
+                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offset));
                 break;
             default:
-                fprintf(stderr, "invalid IR_LOAD_PKT size\n");
+                fprintf(stderr, "invalid IR_LOAD_CTX size\n");
                 exit(1);
             }
 
-            /* A → MEM[dst] */
             bpf_builder_emit(b,
                 (struct bpf_insn)BPF_STMT(BPF_ST, dst));
             break;
         }
 
-
-        case IR_LOAD_CTX: {
-            int dst = temp_slot(&layout, ir->dst);
-
-            // 1. A = *(uint32_t *)(ctx + ir->src1)
-            bpf_builder_emit(b,
-                (struct bpf_insn)BPF_STMT(BPF_LD | BPF_W | BPF_ABS,
-                                  ir->src1));
-
-            // 2. t_dst = A  →  ST MEM[dst]
-            bpf_builder_emit(b,
-                (struct bpf_insn)BPF_STMT(BPF_ST, dst));
-            break;
-        }
-        
         case IR_NATIVE_CALL: {
-    int dst_slot  = temp_slot(&layout, ir->dst);
-    int arg0_slot = temp_slot(&layout, ir->args[0]);
+            int dst_slot  = temp_slot(&layout, ir->dst);
+            int arg0_slot = temp_slot(&layout, ir->args[0]);
 
-    /* A = MEM[arg0_slot] */
-    bpf_builder_emit(b,
-        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
+            /* A = MEM[arg0_slot] */
+            bpf_builder_emit(b,
+                (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
 
-    /* Host-Call: code = BPF_MISC | BPF_COP, k = func_id */
-    bpf_builder_emit(b,
-        (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
-                                  ir->func_id));
+            /* Host-Call: code = BPF_MISC | BPF_COP, k = func_id */
+            bpf_builder_emit(b,
+                (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
+                                          ir->func_id));
 
-    /* A → MEM[dst_slot] */
-    bpf_builder_emit(b,
-        (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
-    break;
-    }
-
+            /* A → MEM[dst_slot] */
+            bpf_builder_emit(b,
+                (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
+            break;
+        }
 
         case IR_LOAD:
             lower_load(&layout, b, ir);

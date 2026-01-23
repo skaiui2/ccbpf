@@ -30,13 +30,10 @@ struct ccbpf_program {
     uint32_t entry;
 };
 
-struct hook_ctx { 
-    uint32_t arg0; 
-    uint32_t arg1; 
-}; 
 
-uint32_t ccbpf_run_ctx(struct ccbpf_program *p, void *ctx, size_t ctx_size);
-uint32_t ccbpf_run_pkt(struct ccbpf_program *p, uint8_t *pkt, size_t len);
+uint32_t ccbpf_run_frame(struct ccbpf_program *p,
+                         void *frame,
+                         size_t frame_size);
 
 struct ccbpf_program ccbpf_load(const char *path);
 void ccbpf_unload(struct ccbpf_program *p);

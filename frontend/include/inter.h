@@ -10,10 +10,8 @@
 
 /* ===== Node ===== */
 enum NodeTag {
-    /* 基础 */
     TAG_NODE = 0,
 
-    /* 表达式节点 */
     TAG_ID,
     TAG_CONSTANT,
     TAG_ACCESS,
@@ -23,12 +21,11 @@ enum NodeTag {
     TAG_LOGICAL,
 
     TAG_RETURN,
-    TAG_CTX, 
-    TAG_PKT,
-    TAG_PKT_PTR,
+    TAG_CTX,
+    TAG_CTX_PTR,
+
     TAG_BUILTIN_CALL,
 
-    /* 语句节点 */
     TAG_SET,
     TAG_SETELEM,
     TAG_IF,
@@ -65,8 +62,6 @@ struct Expr {
     int temp_no;
 };
 
-struct Expr *ctx_load_expr_new(int offset);
-
 struct Expr *expr_new(struct lexer_token *tok, struct Type *type);
 
 /* ========= ctx ==========*/
@@ -76,24 +71,6 @@ struct CtxExpr {
 };
 
 struct Expr *ctx_load_expr_new(int offset);
-
-/* ===== PktIndex ===== */
-struct PktIndex {
-    struct Expr base;
-    struct Expr *index;
-};
-
-struct Expr *pkt_index_new(struct Expr *index);
-
-/* ===== PktPtrExpr =======*/
-struct PktPtrExpr {
-    struct Expr base;
-    int base_offset;            
-    struct StructType *st;        
-};
-
-struct Expr *pkt_ptr_new(int base_offset, struct StructType *st);
-
 
 /* BUILT*/
 struct BuiltinCall {
@@ -118,6 +95,13 @@ extern struct Stmt *Stmt_Enclosing;
 struct Stmt *stmt_new(void);
 
 
+struct CtxPtrExpr {
+    struct Expr base;
+    int base_offset;
+    struct StructType *st;
+};
+
+struct CtxPtrExpr *ctx_ptr_new(int base_offset, struct Type *ty);
 /* ===== Return ===== */
 struct Return {
     struct Stmt base;
@@ -260,12 +244,15 @@ struct For *for_new(struct Stmt *init, struct Expr *cond, struct Stmt *step, str
 struct Id {
     struct Expr base;
     int         offset;
-    int base_offset;
+    int         base_offset;
     struct StructType *st;
+
+    int is_ctx_ptr;  
 };
 
 struct Id *id_new(struct lexer_token *word, struct Type *type, int offset);
 
+struct Id *id_new_from_name(const char *name, struct Type *ty, int offset);
 /* ===== If ===== */
 
 struct If {

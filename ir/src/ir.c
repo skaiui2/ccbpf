@@ -65,11 +65,6 @@ void ir_emit(struct IR ir)
     case IR_DIV:
         printf("[IR] DIV   t%d <- t%d / t%d\n", ir.dst, ir.src1, ir.src2);
         break;
-    case IR_LOAD_PKT:
-        printf("[IR] LOAD_PKT t%d <- PKT[%d] (size=%d)\n",
-               ir.dst, ir.src1, ir.src2);
-        break;
-
     case IR_RET:
         printf("[IR] RET t%d\n", ir.src1);
         break;

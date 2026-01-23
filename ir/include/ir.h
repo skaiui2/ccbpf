@@ -17,7 +17,6 @@ enum IR_Op {
 
     IR_RET,
     IR_LOAD_CTX,    
-    IR_LOAD_PKT,
 
     IR_LOAD,
 

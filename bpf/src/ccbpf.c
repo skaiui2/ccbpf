@@ -67,24 +67,12 @@ void ccbpf_unload(struct ccbpf_program *p)
 }
 
 
-uint32_t ccbpf_run(struct ccbpf_program *p)
+uint32_t ccbpf_run_frame(struct ccbpf_program *p,
+                         void *frame,
+                         size_t frame_size)
 {
-    unsigned char dummy[1] = {0};
-    return bpf_filter(p->insns, dummy, 0, 0);
-}
-
-uint32_t ccbpf_run_ctx(struct ccbpf_program *p, void *ctx, size_t ctx_size)
-{
-    uint32_t tmp[2];
-    struct hook_ctx *c = (struct hook_ctx *)ctx;
-
-    tmp[0] = htonl(c->arg0);
-    tmp[1] = htonl(c->arg1);
-
-    return bpf_filter(p->insns, (unsigned char *)tmp, sizeof(tmp), sizeof(tmp));
-}
-
-uint32_t ccbpf_run_pkt(struct ccbpf_program *p, uint8_t *pkt, size_t len)
-{
-    return bpf_filter(p->insns, pkt, len, len);
+    return bpf_filter(p->insns,
+                      (unsigned char *)frame,
+                      frame_size,
+                      frame_size);
 }

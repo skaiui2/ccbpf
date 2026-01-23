@@ -9,7 +9,7 @@ int hook(void *ctx)
     unsigned int y;
     struct udp_hdr *uh;
 
-    uh = (struct udp_hdr *)&ctx[34];
+    uh = (struct udp_hdr *)&ctx[0];
     x = ntohs(uh->sport);
     print(x);
     y = ntohs(uh->dport);

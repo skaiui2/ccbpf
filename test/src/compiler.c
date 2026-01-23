@@ -5,10 +5,6 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <limits.h>
-
-/* ============================================================
- * 你自己的头文件（用于编译 C → BPF）
- * ============================================================ */
 #include "lexer.h"
 #include "parser.h"
 #include "ir.h"
@@ -18,9 +14,6 @@
 
 #define HOOK_SOCK_PATH "/tmp/ccbpf_hook.sock"
 
-/* ============================================================
- * 发送控制命令到虚拟机（attach / detach）
- * ============================================================ */
 static int send_cmd(const char *cmd)
 {
     int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
@@ -46,9 +39,6 @@ static int send_cmd(const char *cmd)
     return 0;
 }
 
-/* ============================================================
- * 编译 C → BPF
- * ============================================================ */
 static int compile_to_bpf(const char *src, const char *out)
 {
     ir_init();
@@ -84,7 +74,6 @@ static int compile_to_bpf(const char *src, const char *out)
 }
 
 /* ============================================================
- * 主程序：支持三种命令
  *   1. compiler hello.c -o out.ccbpf
  *   2. attach hook_udp_input out.ccbpf
  *   3. detach hook_udp_input
@@ -99,9 +88,6 @@ int main(int argc, char **argv)
         return 1;
     }
 
-    /* ============================
-     * 1. 编译模式
-     * ============================ */
     if (strcmp(argv[1], "attach") != 0 &&
         strcmp(argv[1], "detach") != 0)
     {
@@ -115,9 +101,6 @@ int main(int argc, char **argv)
         return compile_to_bpf(src, out);
     }
 
-    /* ============================
-     * 2. attach 模式
-     * ============================ */
     if (strcmp(argv[1], "attach") == 0) {
         if (argc != 4) {
             fprintf(stderr, "usage: %s attach <hook_name> <path>\n", argv[0]);
@@ -138,9 +121,6 @@ int main(int argc, char **argv)
         return send_cmd(buf);
     }
 
-    /* ============================
-     * 3. detach 模式
-     * ============================ */
     if (strcmp(argv[1], "detach") == 0) {
         if (argc != 3) {
             fprintf(stderr, "usage: %s detach <hook_name>\n", argv[0]);
