@@ -393,12 +393,43 @@ void parser_decls(struct Parser *p)
 
 struct Type *parser_type(struct Parser *p)
 {
-    /* BASIC 类型 */
-    if (p->look->tag == BASIC) {
-        struct Type *tp = basic_type_from_token(p->look);
-        parser_match(p, BASIC);
+    /* ===== unsigned, only：
+     *   unsigned short
+     *   unsigned int
+     *   unsigned char
+     * errors: unsigned short int / unsigned int int / unsigned char int
+     */
+    if (p->look->tag == BASIC &&
+        p->look->lexeme &&
+        strcmp(p->look->lexeme, "unsigned") == 0)
+    {
+        parser_match(p, BASIC);  // eat "unsigned"
 
-        /* 指针层级 */
+        if (p->look->tag != BASIC || !p->look->lexeme)
+            parser_error(p, "expected type after 'unsigned'");
+
+        struct Type *tp = NULL;
+
+        if (strcmp(p->look->lexeme, "short") == 0) {
+            tp = Type_Short;
+        } else if (strcmp(p->look->lexeme, "int") == 0) {
+            tp = Type_Int;
+        } else if (strcmp(p->look->lexeme, "char") == 0) {
+            tp = Type_Byte;
+        } else {
+            parser_error(p, "only 'unsigned short', 'unsigned int', 'unsigned char' are supported");
+        }
+
+        parser_match(p, BASIC);  // eat short/int/char
+
+        if (p->look->tag == BASIC &&
+            p->look->lexeme &&
+            strcmp(p->look->lexeme, "int") == 0)
+        {
+            parser_error(p, "unexpected 'int' after 'unsigned' type");
+        }
+
+        /* ptr */
         while (p->look->tag == STAR) {
             parser_match(p, STAR);
             tp = (struct Type *)ptr_new(tp);
@@ -407,7 +438,21 @@ struct Type *parser_type(struct Parser *p)
         return tp;
     }
 
-    /* struct 类型 */
+    if (p->look->tag == BASIC) {
+        struct Type *tp = basic_type_from_token(p->look);
+        if (!tp)
+            parser_error(p, "unknown basic type");
+
+        parser_match(p, BASIC);
+
+        while (p->look->tag == STAR) {
+            parser_match(p, STAR);
+            tp = (struct Type *)ptr_new(tp);
+        }
+
+        return tp;
+    }
+
     if (p->look->tag == STRUCT) {
         parser_match(p, STRUCT);
 
@@ -420,7 +465,7 @@ struct Type *parser_type(struct Parser *p)
 
         parser_match(p, ID);
 
-        /* 指针层级 */
+        /* ptr */
         while (p->look->tag == STAR) {
             parser_match(p, STAR);
             tp = (struct Type *)ptr_new(tp);

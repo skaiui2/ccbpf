@@ -1,18 +1,17 @@
 struct udp_hdr {
-    int sport;
-    int dport;
+    unsigned short sport;
+    unsigned short dport;
 };
 
 int hook(void *ctx, char *pkt)
 {
-    int x;
-    int y;
+    unsigned int x;
+    unsigned int y;
     struct udp_hdr *uh;
 
-    x = ntohl(pkt[34]);
-    print(x);
-
     uh = (struct udp_hdr *)&pkt[34];
+    x = ntohs(uh->sport);
+    print(x);
     y = uh->dport;
     print(y);
     return x + y;

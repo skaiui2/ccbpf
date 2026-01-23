@@ -96,6 +96,8 @@ void lexer_init(struct lexer *lex)
     lexer_reserve(lex, "bool", BASIC);
     lexer_reserve(lex, "char", BASIC);
     lexer_reserve(lex, "float", BASIC);
+    lexer_reserve(lex, "short", BASIC);
+    lexer_reserve(lex, "unsigned", BASIC);
     lexer_reserve(lex, "return", RETURN);
 
     lexer_reserve(lex, "struct", STRUCT);

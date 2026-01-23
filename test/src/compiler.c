@@ -138,14 +138,7 @@ int main(void)
     buf[34] = 254;
     buf[35] = 0;
     buf[36] = 0;
-    buf[37] = 0;
-
-
-    buf[38] = 0;
-    buf[39] = 0;
-    buf[40] = 1;
-    buf[41] = 0;
-
+    buf[37] = 1;
 
     printf("result = %d\n", test_pkt(buf, 64));  
 
