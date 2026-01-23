@@ -147,24 +147,11 @@ static struct Stmt *parse_hook_function(struct Parser *p)
         parser_error(p, "expected `ctx`");
     parser_move(p);
 
-    parser_match(p, COMMA);
-
-    /* char */
-    if (p->look->tag != BASIC || strcmp(p->look->lexeme, "char") != 0)
-        parser_error(p, "expected `char`");
-    parser_move(p);
-
-    parser_match(p, STAR);
-
-    /* pkt */
-    if (p->look->tag != ID || strcmp(p->look->lexeme, "pkt") != 0)
-        parser_error(p, "expected `pkt`");
-    parser_move(p);
-
     parser_match(p, RPAREN);
 
     return parser_block(p);
 }
+
 
 static void parser_struct_decl(struct Parser *p)
 {
@@ -633,8 +620,8 @@ struct Stmt *parser_assign(struct Parser *p)
             parser_match(p, RPAREN);
             parser_match(p, AND_BIT);
 
-            if (p->look->tag != ID || strcmp(p->look->lexeme, "pkt") != 0)
-                parser_error(p, "expected pkt");
+            if (p->look->tag != ID || strcmp(p->look->lexeme, "ctx") != 0)
+                parser_error(p, "expected ctx");
 
             parser_match(p, ID);
             parser_match(p, LBRACKET);

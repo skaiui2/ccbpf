@@ -1,85 +1,129 @@
 #include <stdio.h>
 #include <stdint.h>
-#include "cbpf.h"
+#include <string.h>
+#include <unistd.h>
+#include <sys/socket.h>
+#include <sys/un.h>
+#include <fcntl.h>
+
 #include "ccbpf.h"
 
+#define HOOK_SOCK_PATH "/tmp/ccbpf_hook.sock"
 
-void bpf_vm_code_test()
+struct hook_state {
+    int attached;
+    struct ccbpf_program prog;
+};
+
+static int g_hook_sock = -1;
+static struct hook_state g_udp_input_hook = {0};
+
+static int hook_control_init(void)
 {
-    struct bpf_insn prog[] = {
-        // mem[0] = 10
-        { BPF_LD|BPF_IMM, 0,0,10 },
-        { BPF_ST,         0,0,0 },
+    int fd = socket(AF_UNIX, SOCK_DGRAM, 0);
+    if (fd < 0) {
+        perror("socket");
+        return -1;
+    }
 
-        // mem[1] = 20
-        { BPF_LD|BPF_IMM, 0,0,20 },
-        { BPF_ST,         0,0,1 },
+    struct sockaddr_un addr;
+    memset(&addr, 0, sizeof(addr));
+    addr.sun_family = AF_UNIX;
+    strncpy(addr.sun_path, HOOK_SOCK_PATH, sizeof(addr.sun_path) - 1);
 
-        // mem[2] = 30
-        { BPF_LD|BPF_IMM, 0,0,30 },
-        { BPF_ST,         0,0,2 },
+    unlink(HOOK_SOCK_PATH);
+    if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0) {
+        perror("bind");
+        close(fd);
+        return -1;
+    }
 
-        // mem[3] = 40
-        { BPF_LD|BPF_IMM, 0,0,40 },
-        { BPF_ST,         0,0,3 },
+    int flags = fcntl(fd, F_GETFL, 0);
+    fcntl(fd, F_SETFL, flags | O_NONBLOCK);
 
-        // mem[4] = 50
-        { BPF_LD|BPF_IMM, 0,0,50 },
-        { BPF_ST,         0,0,4 },
-
-        // A = mem[0]
-        { BPF_LD|BPF_MEM, 0,0,0 },
-
-        // A += mem[1]
-        { BPF_LDX|BPF_MEM, 0,0,1 },
-        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
-
-        // A += mem[2]
-        { BPF_LDX|BPF_MEM, 0,0,2 },
-        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
-
-        // A += mem[3]
-        { BPF_LDX|BPF_MEM, 0,0,3 },
-        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
-
-        // A += mem[4]
-        { BPF_LDX|BPF_MEM, 0,0,4 },
-        { BPF_ALU|BPF_ADD|BPF_X, 0,0,0 },
-
-        // return A
-        { BPF_RET|BPF_A, 0,0,0 },
-    };
-
-    uint8_t dummy[1] = {0};
-
-    u_int result = bpf_filter(prog, dummy, sizeof(dummy), sizeof(dummy));
-
-    printf("BPF sum result: %u\n", result); // 150
+    g_hook_sock = fd;
+    return 0;
 }
 
-int test_pkt(uint8_t *packet, int len)
+static void hook_process_control_messages(void)
 {
-    struct ccbpf_program prog = ccbpf_load("../../build/out.ccbpf");
+    if (g_hook_sock < 0)
+        return;
 
-    uint32_t r = ccbpf_run_pkt(&prog, packet, len);
+    for (;;) {
+        char buf[512];
+        ssize_t n = recv(g_hook_sock, buf, sizeof(buf) - 1, 0);
+        if (n <= 0)
+            break;  
 
-    ccbpf_unload(&prog);
+        buf[n] = '\0';
 
-    return r;
+        if (strncmp(buf, "ATTACH ", 7) == 0) {
+            char hook[64], path[256];
+            if (sscanf(buf, "ATTACH %63s %255s", hook, path) != 2)
+                continue;
+
+            if (strcmp(hook, "hook_udp_input") != 0)
+                continue;
+
+            if (g_udp_input_hook.attached) {
+                ccbpf_unload(&g_udp_input_hook.prog);
+                g_udp_input_hook.attached = 0;
+            }
+
+            g_udp_input_hook.prog = ccbpf_load(path);
+            g_udp_input_hook.attached = 1;
+
+            printf("[hook] ATTACH hook_udp_input: %s\n", path);
+        }
+
+        else if (strncmp(buf, "DETACH ", 7) == 0) {
+            char hook[64];
+            if (sscanf(buf, "DETACH %63s", hook) != 1)
+                continue;
+
+            if (strcmp(hook, "hook_udp_input") != 0)
+                continue;
+
+            if (g_udp_input_hook.attached) {
+                ccbpf_unload(&g_udp_input_hook.prog);
+                g_udp_input_hook.attached = 0;
+                printf("[hook] DETACH hook_udp_input\n");
+            }
+        }
+    }
+}
+
+uint32_t hook_udp_input(uint8_t *packet, int len)
+{
+    hook_process_control_messages();
+
+    if (!g_udp_input_hook.attached)
+        return 0;
+
+    return ccbpf_run_pkt(&g_udp_input_hook.prog, packet, len);
 }
 
 int main(void)
 {
-    
+    if (hook_control_init() < 0) {
+        fprintf(stderr, "failed to init hook control socket\n");
+        return 1;
+    }
+
     uint8_t buf[64] = {0};
+    buf[34] = 1; 
+    buf[35] = 0;  
+    buf[36] = 0; 
+    buf[37] = 1; 
 
-    buf[34] = 254;
-    buf[35] = 0;
-    buf[36] = 0;
-    buf[37] = 1;
+    for (;;) {
+        uint32_t r = hook_udp_input(buf, 64);
+        printf("hook_udp_input() returned %u\n", r);
+        sleep(1);
+    }
 
-    printf("result = %d\n", test_pkt(buf, 64));  
-
-
+    close(g_hook_sock);
+    unlink(HOOK_SOCK_PATH);
     return 0;
 }

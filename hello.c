@@ -3,16 +3,16 @@ struct udp_hdr {
     unsigned short dport;
 };
 
-int hook(void *ctx, char *pkt)
+int hook(void *ctx)
 {
     unsigned int x;
     unsigned int y;
     struct udp_hdr *uh;
 
-    uh = (struct udp_hdr *)&pkt[34];
+    uh = (struct udp_hdr *)&ctx[34];
     x = ntohs(uh->sport);
     print(x);
-    y = uh->dport;
+    y = ntohs(uh->dport);
     print(y);
     return x + y;
 }

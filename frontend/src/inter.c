@@ -550,7 +550,6 @@ static char *builtin_tostring(struct Node *self)
     return buf;
 }
 
-
 struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
 {
     struct BuiltinCall *b = malloc(sizeof(*b));
@@ -561,16 +560,29 @@ struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
 
     b->base.temp_no = 0;
 
-    b->base.type = Type_Int;   
-
     struct lexer_token *tok = malloc(sizeof(*tok));
     tok->tag = ID;
 
     switch (func_id) {
-    case NATIVE_NTOHL:  tok->lexeme = strdup("ntohl");  break;
-    case NATIVE_NTOHS:  tok->lexeme = strdup("ntohs");  break;
-    case NATIVE_PRINTF: tok->lexeme = strdup("print");  break;
-    default:            tok->lexeme = strdup("builtin"); break;
+    case NATIVE_NTOHL:
+        tok->lexeme   = strdup("ntohl");
+        b->base.type  = Type_Int; 
+        break;
+
+    case NATIVE_NTOHS:
+        tok->lexeme   = strdup("ntohs");
+        b->base.type  = Type_Short; 
+        break;
+
+    case NATIVE_PRINTF:
+        tok->lexeme   = strdup("print");
+        b->base.type  = Type_Int;   
+        break;
+
+    default:
+        tok->lexeme   = strdup("builtin");
+        b->base.type  = Type_Int;
+        break;
     }
 
     b->base.op = tok;
@@ -581,7 +593,6 @@ struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
 
     return b;
 }
-
 
 
 /* ============================================================
