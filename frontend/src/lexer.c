@@ -126,6 +126,28 @@ struct lexer_token *lexer_scan(struct lexer *lex)
     }
 
     switch (lex->peek) {
+        case '"': {
+            char buf[128];
+            int i = 0;
+
+            readch(lex);
+
+            while (lex->peek != '"' && lex->peek != '\0') {
+                if (i < 128)
+                    buf[i++] = lex->peek;
+                readch(lex);
+            }
+
+            buf[i] = '\0';
+
+            readch(lex);
+
+            struct lexer_token *t = malloc(sizeof(*t));
+            t->tag = STRING;
+            t->lexeme = strdup(buf);
+            return t;
+        }
+
         case '&':
             if (readch_match(lex, '&')) return new_lexer_token_char(AND, '&');
             return new_lexer_token_char(AND_BIT, '&');

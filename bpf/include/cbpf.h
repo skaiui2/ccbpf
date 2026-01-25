@@ -145,6 +145,9 @@ struct ccbpf_program {
     size_t map_count;                
 
     uint32_t entry;
+
+    int string_count; 
+    char **strings;
 };
 
 /*

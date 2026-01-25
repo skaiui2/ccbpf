@@ -26,7 +26,12 @@ int new_temp(void)
     return temp_count++; 
 }
 
-static int is_builtin_call(struct Node *self)
+static inline int is_string(struct Node *self)
+{
+    return self->tag == TAG_STRING;
+} 
+
+static inline int is_builtin_call(struct Node *self)
 {
     return self->tag == TAG_BUILTIN_CALL;
 }
@@ -174,6 +179,20 @@ static struct Node *expr_gen(struct Node *self)
     if (e->temp_no == 0)
         e->temp_no = new_temp();
 
+    if (is_string(self)) {
+        struct StringLiteral *sl = (struct StringLiteral *)self;
+
+        if (e->temp_no == 0)
+            e->temp_no = new_temp();
+
+        struct IR ir = {0};
+        ir.op   = IR_MOVE;
+        ir.dst  = e->temp_no;
+        ir.src1 = sl->str_id;   
+        ir_emit(ir);
+        return self;
+    }
+
     if (is_builtin_call(self)) {
         struct BuiltinCall *b = (struct BuiltinCall *)self;
         for (int i = 0; i < b->argc; i++)
@@ -184,6 +203,7 @@ static struct Node *expr_gen(struct Node *self)
         ir.dst     = e->temp_no;
         ir.func_id = b->func_id;
         ir.argc    = b->argc;
+        ir.arg_width = b->base.type->width;
 
         for (int i = 0; i < b->argc; i++)
             ir.args[i] = b->args[i]->temp_no;
@@ -192,7 +212,6 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== ctx ===== */
     if (is_ctx(self)) {
         struct CtxExpr *c = (struct CtxExpr *)self;
         struct IR ir = {0};
@@ -273,7 +292,6 @@ static struct Node *expr_gen(struct Node *self)
         return self;
     }
 
-    /* ===== unary ===== */
     if (is_unary(self)) {
         struct Unary *u = (struct Unary *)self;
 
@@ -329,26 +347,20 @@ static struct Node *ctxexpr_gen(struct Node *self)
     struct IR ir = {0};
     ir.op   = IR_LOAD_CTX;
     ir.dst  = e->temp_no;
-    ir.src1 = c->offset;   // 0 -> arg0, 4 -> arg1
+    ir.src1 = c->offset;
+    ir.src2 = e->type->width;  
 
     ir_emit(ir);
     return self;
 }
 
-
 static char *ctxexpr_tostring(struct Node *self)
 {
     struct CtxExpr *c = (struct CtxExpr *)self;
 
-    if (c->offset == 0)
-        return strdup("ctx.arg0");
-    else if (c->offset == 4)
-        return strdup("ctx.arg1");
-    else {
-        char *buf = malloc(32);
-        snprintf(buf, 32, "ctx[%d]", c->offset);
-        return buf;
-    }
+    char *buf = malloc(32);
+    snprintf(buf, 32, "ctx[%d]", c->offset);
+    return buf;
 }
 
 struct Expr *ctx_load_expr_new(int offset)
@@ -357,17 +369,19 @@ struct Expr *ctx_load_expr_new(int offset)
 
     c->base.base.tag = TAG_CTX;
     c->base.op       = NULL;
-    c->base.type     = Type_Int;
-    c->base.temp_no  = 0;
 
-    c->offset = offset;
+    c->base.type     = Type_Byte;
+
+    c->base.temp_no  = 0;
+    c->offset        = offset;
 
     c->base.base.gen      = (void *)expr_gen;
     c->base.base.jumping  = NULL;
-    c->base.base.tostring = ctxexpr_tostring;  
+    c->base.base.tostring = ctxexpr_tostring;
 
     return &c->base;
 }
+
 
 /* Return */
 static void return_gen(struct Node *self, int b, int a)
@@ -993,6 +1007,79 @@ static void rel_jumping(struct Node *self, int t, int f)
     snprintf(test, len, "%s %s %s", s1, op, s2);
 
     node_emit_jumps(test, t, f);
+}
+
+
+/*STRING*/
+char *string_pool[256];
+int string_pool_count = 0;
+
+int intern_string(const char *s) {
+    int id = string_pool_count++;
+    string_pool[id] = strdup(s);
+    return id;
+}
+
+static char *unescape_c_string(const char *s)
+{
+    size_t len = strlen(s);
+    char *out = malloc(len + 1);  
+    if (!out) return NULL;
+
+    char *w = out;
+    const char *r = s;
+
+    while (*r) {
+        if (*r == '\\') {
+            r++;
+            switch (*r) {
+            case 'n':
+                *w++ = '\n';
+                r++;
+                break;
+            case 't':
+                *w++ = '\t';
+                r++;
+                break;
+            case '\\':
+                *w++ = '\\';
+                r++;
+                break;
+            case '\"':
+                *w++ = '\"';
+                r++;
+                break;
+            case '\0':
+                goto done;
+            default:
+                *w++ = '\\';
+                *w++ = *r++;
+                break;
+            }
+        } else {
+            *w++ = *r++;
+        }
+    }
+
+done:
+    *w = '\0';
+    return out;
+}
+
+struct Expr *string_literal_new(const char *s)
+{
+    struct StringLiteral *sl = malloc(sizeof(*sl));
+
+    sl->base.base.tag = TAG_STRING;
+    sl->base.op       = NULL;
+    sl->base.type     = Type_Int; 
+    sl->base.temp_no  = 0;
+
+    char *unescaped = unescape_c_string(s);
+    sl->str_id = intern_string(unescaped);
+    free(unescaped);
+
+    return (struct Expr *)sl;
 }
 
 /* ============================================================

@@ -774,6 +774,13 @@ struct Expr *parser_factor(struct Parser *p)
 
     switch (p->look->tag) {
 
+    case STRING: {
+        struct Expr *e = (struct Expr *)string_literal_new(p->look->lexeme);
+        parser_move(p);
+        return e;
+    }
+
+
     case LPAREN: {
         parser_move(p);
 
@@ -864,42 +871,51 @@ struct Expr *parser_factor(struct Parser *p)
         if (strcmp(p->look->lexeme, "print") == 0) {
             parser_move(p);
             parser_match(p, LPAREN);
-            struct Expr *arg = parser_bool(p);
+
+            struct Expr *arg = NULL;
+            //process string
+            if (p->look->tag == STRING) {
+                arg = parser_factor(p);  
+                parser_match(p, RPAREN);
+                struct Expr *args[1] = { arg };
+                return (struct Expr *)builtin_call_new(NATIVE_PRINT_STR, 1, args);
+            }
+            //process digster
+            arg = parser_bool(p);
             parser_match(p, RPAREN);
             struct Expr *args[1] = { arg };
             return (struct Expr *)builtin_call_new(NATIVE_PRINTF, 1, args);
         }
 
         if (strcmp(p->look->lexeme, "map_lookup") == 0) {
-    parser_move(p);
-    parser_match(p, LPAREN);
+            parser_move(p);
+            parser_match(p, LPAREN);
 
-    struct Expr *mapid = parser_bool(p);   // 第一个参数：map_id
-    parser_match(p, COMMA);
-    struct Expr *key   = parser_bool(p);   // 第二个参数：key
+            struct Expr *mapid = parser_bool(p);  
+            parser_match(p, COMMA);
+            struct Expr *key   = parser_bool(p); 
 
-    parser_match(p, RPAREN);
+            parser_match(p, RPAREN);
 
-    struct Expr *args[2] = { mapid, key };
-    return (struct Expr *)builtin_call_new(NATIVE_MAP_LOOKUP, 2, args);
-}
+            struct Expr *args[2] = { mapid, key };
+            return (struct Expr *)builtin_call_new(NATIVE_MAP_LOOKUP, 2, args);
+        }
 
-if (strcmp(p->look->lexeme, "map_update") == 0) {
-    parser_move(p);
-    parser_match(p, LPAREN);
+        if (strcmp(p->look->lexeme, "map_update") == 0) {
+            parser_move(p);
+            parser_match(p, LPAREN);
 
-    struct Expr *mapid = parser_bool(p);   // map_id
-    parser_match(p, COMMA);
-    struct Expr *key   = parser_bool(p);   // key
-    parser_match(p, COMMA);
-    struct Expr *value = parser_bool(p);   // value
+            struct Expr *mapid = parser_bool(p);   
+            parser_match(p, COMMA);
+            struct Expr *key   = parser_bool(p);  
+            parser_match(p, COMMA);
+            struct Expr *value = parser_bool(p);  
 
-    parser_match(p, RPAREN);
+            parser_match(p, RPAREN);
 
-    struct Expr *args[3] = { mapid, key, value };
-    return (struct Expr *)builtin_call_new(NATIVE_MAP_UPDATE, 3, args);
-}
-
+            struct Expr *args[3] = { mapid, key, value };
+            return (struct Expr *)builtin_call_new(NATIVE_MAP_UPDATE, 3, args);
+        }
 
         struct Id *id = env_get_var(p->top, p->look->lexeme);
         if (!id)

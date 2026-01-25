@@ -47,22 +47,23 @@
 #include <memory.h>
 #include <stdio.h>
 
-#define BPF_ALIGN
+static inline u_short extract_short_raw(const void *p)
+{
+    u_short v;
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
 
-#ifndef BPF_ALIGN
-#define EXTRACT_SHORT(p)	((u_short)ntohs(*(u_short *)p))
-#define EXTRACT_LONG(p)		(ntohl(*(u_long *)p))
-#else
-#define EXTRACT_SHORT(p)\
-	((u_short)\
-		((u_short)*((u_char *)p+0)<<8|\
-		 (u_short)*((u_char *)p+1)<<0))
-#define EXTRACT_LONG(p)\
-		((u_long)*((u_char *)p+0)<<24|\
-		 (u_long)*((u_char *)p+1)<<16|\
-		 (u_long)*((u_char *)p+2)<<8|\
-		 (u_long)*((u_char *)p+3)<<0)
-#endif
+static inline u_long extract_long_raw(const void *p)
+{
+    u_long v;
+    memcpy(&v, p, sizeof(v));
+    return v;
+}
+
+#define EXTRACT_SHORT(p)  extract_short_raw(p)
+#define EXTRACT_LONG(p)   extract_long_raw(p)
+
 
 
 #define CCBPF_STACK_SIZE 512
@@ -260,7 +261,7 @@ u_int ccbpf_vm_exec(struct ccbpf_program *prog,
 
         case BPF_ALU | BPF_RSH | BPF_X:
             A >>= X;
-            continue;
+            continue;;
 
         case BPF_ALU | BPF_ADD | BPF_K:
             A += pc->k;
@@ -316,10 +317,44 @@ u_int ccbpf_vm_exec(struct ccbpf_program *prog,
             case NATIVE_NTOHS:
                 A = ntohs((u_short)A);
                 break;
-            case NATIVE_PRINTF:
-                printf("%lu\n", (unsigned long)A);
+            case NATIVE_PRINTF: {
+                uint64_t val = A;
+                uint64_t w   = X;  
+
+                switch (w) {
+                case 1:
+                    printf("%u", (unsigned)(val & 0xFF));
+                    break;
+                case 2:
+                    printf("%u", (unsigned)(val & 0xFFFF));
+                    break;
+                case 4:
+                    printf("%u", (unsigned)(val & 0xFFFFFFFF));
+                    break;
+                case 8:
+                    printf("%llu", (unsigned long long)val);
+                    break;
+                default:
+                    printf("%llu", (unsigned long long)val);
+                    break;
+                }
                 A = 0;
                 break;
+            }   
+
+            case NATIVE_PRINT_STR: {
+                uint32_t id = (uint32_t)A;
+                if (id >= prog->string_count) {
+                    A = 0;
+                    break;
+                }
+
+                const char *s = prog->strings[id];
+                printf("%s", s);
+
+                A = 0;
+                break;
+            }
 
             case NATIVE_MAP_LOOKUP: {
     			uint32_t map_id = (uint32_t)X;

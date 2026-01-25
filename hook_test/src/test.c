@@ -5,18 +5,28 @@
 #include <sys/socket.h>
 #include <sys/un.h>
 #include <fcntl.h>
-
+#include <time.h>
+#include <arpa/inet.h>
+#include <stdlib.h>
 #include "ccbpf.h"
 
 #define HOOK_SOCK_PATH "/tmp/ccbpf_hook.sock"
 
+struct udp_hdr {
+    uint16_t sport;
+    uint16_t dport;
+    uint16_t len;
+    uint16_t checksum;
+};
+
 struct hook_state {
     int attached;
-    struct ccbpf_program *prog;  
+    struct ccbpf_program *prog;
 };
 
 static int g_hook_sock = -1;
 static struct hook_state g_udp_input_hook = {0};
+
 
 static int hook_control_init(void)
 {
@@ -72,7 +82,7 @@ static void hook_process_control_messages(void)
                 g_udp_input_hook.attached = 0;
             }
 
-            g_udp_input_hook.prog = ccbpf_load(path);  
+            g_udp_input_hook.prog = ccbpf_load(path);
             g_udp_input_hook.attached = 1;
 
             printf("[hook] ATTACH hook_udp_input: %s\n", path);
@@ -96,15 +106,40 @@ static void hook_process_control_messages(void)
     }
 }
 
+static uint64_t now_ms(void)
+{
+    struct timespec ts;
+    clock_gettime(1, &ts);
+    return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
+}
+
+static uint64_t g_pkt_count = 0;
+static uint64_t g_byte_count = 0;
+static uint64_t g_last_ts = 0;
+
 uint32_t hook_udp_input(uint8_t *frame, int frame_size)
 {
     hook_process_control_messages();
+
+    uint64_t now = now_ms();
+    g_pkt_count++;
+    g_byte_count += frame_size;
+
+    if (now - g_last_ts >= 1000) {
+        printf("[wirefisher] pps=%llu, bps=%llu\n",
+               (unsigned long long)g_pkt_count,
+               (unsigned long long)g_byte_count);
+        g_pkt_count = 0;
+        g_byte_count = 0;
+        g_last_ts = now;
+    }
 
     if (!g_udp_input_hook.attached || !g_udp_input_hook.prog)
         return 0;
 
     return ccbpf_run_frame(g_udp_input_hook.prog, frame, frame_size);
 }
+
 
 int main(void)
 {
@@ -113,22 +148,26 @@ int main(void)
         return 1;
     }
 
-    uint8_t pkt_bytes[64];
+    uint8_t pkt_bytes[4096];  
+    struct udp_hdr *uh = (struct udp_hdr *)pkt_bytes;
 
-    pkt_bytes[0] = 1;
-    pkt_bytes[1] = 0;
-
-    pkt_bytes[2] = 0;
-    pkt_bytes[3] = 1;
+    srand(time(NULL));
 
     for (;;) {
-        printf("[MAIN] pkt_bytes: %02x %02x %02x %02x\n",
-               pkt_bytes[0], pkt_bytes[1], pkt_bytes[2], pkt_bytes[3]);
+        int payload_len = 200;
+        int udp_len = 8 + payload_len;
 
-        uint32_t r = hook_udp_input(pkt_bytes, sizeof(pkt_bytes));
-        printf("hook_udp_input() returned %u\n", r);
+        uh->sport = htons(10000);
+        uh->dport = htons(20000);
+        uh->len   = htons(udp_len);
+        uh->checksum = 0;
 
-        sleep(1);
+        for (int i = 8; i < udp_len; i++)
+            pkt_bytes[i] = rand() & 0xFF;
+
+        uint32_t r = hook_udp_input(pkt_bytes, udp_len);
+
+        usleep(5000 + rand() % 45000);
     }
 
     close(g_hook_sock);

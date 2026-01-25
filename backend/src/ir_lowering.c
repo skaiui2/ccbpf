@@ -74,6 +74,10 @@ void ir_lower_program(struct IR *head, int label_count,
             case NATIVE_NTOHS:
             case NATIVE_PRINTF: {
                 int arg0_slot = temp_slot(&layout, ir->args[0]);
+                bpf_builder_emit(b, (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot)); 
+                if (ir->func_id == NATIVE_PRINTF) { 
+                    bpf_builder_emit(b, (struct bpf_insn)BPF_STMT(BPF_LDX | BPF_IMM, ir->arg_width)); 
+                }
 
                 bpf_builder_emit(b,
                     (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
@@ -86,6 +90,20 @@ void ir_lower_program(struct IR *head, int label_count,
                     (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
                 break;
             }
+            case NATIVE_PRINT_STR: {
+                int arg0_slot = temp_slot(&layout, ir->args[0]);
+
+                bpf_builder_emit(b,
+                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
+
+                bpf_builder_emit(b,
+                    (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP, NATIVE_PRINT_STR));
+
+                bpf_builder_emit(b,
+                    (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
+                break;
+            }
+
 
             case NATIVE_MAP_LOOKUP: {
                 int map_id_slot = temp_slot(&layout, ir->args[0]);

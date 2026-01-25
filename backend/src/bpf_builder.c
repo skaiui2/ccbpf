@@ -62,22 +62,31 @@ int bpf_builder_count(struct bpf_builder *b)
     return b->count;
 }
 
+extern char *string_pool[256];
+extern int   string_pool_count;
 
 void write_ccbpf(const char *path, struct bpf_insn *insns, size_t insn_count)
 {
     struct CCBPF_Header hdr = {0};
 
-    hdr.magic       = CCBPF_MAGIC;
-    hdr.version     = 1;
-    hdr.flags       = 0;
+    hdr.magic   = CCBPF_MAGIC;
+    hdr.version = 1;
+    hdr.flags   = 0;
 
     hdr.code_offset = sizeof(struct CCBPF_Header);
     hdr.code_size   = (uint32_t)(insn_count * sizeof(struct bpf_insn));
 
-    hdr.data_offset = 0;
-    hdr.data_size   = 0;
+    uint32_t str_size = sizeof(int); // string_count
+    for (int i = 0; i < string_pool_count; i++) {
+        int len = (int)strlen(string_pool[i]) + 1;
+        str_size += sizeof(int); // len
+        str_size += len;         // bytes
+    }
 
-    hdr.entry       = 0; 
+    hdr.data_offset = hdr.code_offset + hdr.code_size;
+    hdr.data_size   = str_size;
+
+    hdr.entry = 0;
 
     FILE *fp = fopen(path, "wb");
     if (!fp) {
@@ -86,7 +95,15 @@ void write_ccbpf(const char *path, struct bpf_insn *insns, size_t insn_count)
     }
 
     fwrite(&hdr, sizeof(hdr), 1, fp);
+
     fwrite(insns, sizeof(struct bpf_insn), insn_count, fp);
+
+    fwrite(&string_pool_count, sizeof(int), 1, fp);
+    for (int i = 0; i < string_pool_count; i++) {
+        int len = (int)strlen(string_pool[i]) + 1;
+        fwrite(&len, sizeof(int), 1, fp);
+        fwrite(string_pool[i], 1, len, fp);
+    }
 
     fclose(fp);
 }

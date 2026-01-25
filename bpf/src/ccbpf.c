@@ -26,23 +26,40 @@ struct ccbpf_program *ccbpf_load(const char *path)
         return NULL;
     }
 
+    // get code
     fseek(fp, hdr.code_offset, SEEK_SET);
     size_t insn_count = hdr.code_size / sizeof(struct bpf_insn);
 
     prog->insns = malloc(hdr.code_size);
     fread(prog->insns, sizeof(struct bpf_insn), insn_count, fp);
+    prog->insn_count = insn_count;
+
+    // get string (in data area)
+    prog->string_count = 0;
+    prog->strings      = NULL;
 
     if (hdr.data_size > 0) {
         fseek(fp, hdr.data_offset, SEEK_SET);
-        prog->data = malloc(hdr.data_size);
-        fread(prog->data, 1, hdr.data_size, fp);
+
+        int count = 0;
+        fread(&count, sizeof(int), 1, fp);
+        prog->string_count = count;
+
+        prog->strings = calloc(count, sizeof(char *));
+        for (int i = 0; i < count; i++) {
+            int len = 0;
+            fread(&len, sizeof(int), 1, fp);
+
+            char *buf = malloc(len);
+            fread(buf, 1, len, fp);
+
+            prog->strings[i] = buf;
+        }
     }
 
     fclose(fp);
 
-    prog->insn_count = insn_count;
-    prog->data_size  = hdr.data_size;
-    prog->entry      = hdr.entry;
+    prog->entry = hdr.entry;
 
     prog->map_count = CCBPF_MAX_MAPS;
     for (size_t i = 0; i < prog->map_count; i++) {
@@ -51,6 +68,7 @@ struct ccbpf_program *ccbpf_load(const char *path)
 
     return prog;
 }
+
 
 void ccbpf_unload(struct ccbpf_program *prog)
 {

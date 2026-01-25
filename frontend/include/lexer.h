@@ -24,6 +24,8 @@ enum tag {
     NUM,           // integer literal
     OR,            // ||
     REAL,          // float literal
+    STRING,
+
     TEMP,
     TRUE,
     WHILE,

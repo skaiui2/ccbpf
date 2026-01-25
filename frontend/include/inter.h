@@ -18,6 +18,7 @@ enum NodeTag {
     TAG_ARITH,
     TAG_UNARY,
     TAG_REL,
+    TAG_STRING,
     TAG_LOGICAL,
 
     TAG_RETURN,
@@ -296,6 +297,14 @@ struct Rel {
 
 struct Rel *rel_new(struct lexer_token *tok, struct Expr *x1, struct Expr *x2);
 
+
+/*STRING*/
+struct StringLiteral {
+    struct Expr base;
+    int str_id;   
+};
+
+struct Expr *string_literal_new(const char *s); 
 /* ===== Seq ===== */
 
 struct Seq {
