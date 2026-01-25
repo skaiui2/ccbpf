@@ -8,6 +8,8 @@ enum {
     NATIVE_NTOHL = 1,
     NATIVE_NTOHS = 2,
     NATIVE_PRINTF = 3,
+    NATIVE_MAP_LOOKUP = 4,
+    NATIVE_MAP_UPDATE = 5,
 };
 
 

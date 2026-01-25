@@ -80,7 +80,7 @@ struct BuiltinCall {
     struct Expr *args[4]; 
 };
 
-struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg);
+struct BuiltinCall *builtin_call_new(int func_id, int argc, struct Expr **args);
 
 /* ===== Stmt ===== */
 

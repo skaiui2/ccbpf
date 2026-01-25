@@ -552,21 +552,21 @@ struct Stmt *parser_stmt(struct Parser *p)
         return (struct Stmt *)return_new(x);
 
     default: {
-        /* 如果是内建函数开头：ntohl/ntohs/print，直接当表达式语句处理 */
         if (p->look->tag == ID && p->look->lexeme) {
             const char *name = p->look->lexeme;
 
             if (strcmp(name, "ntohl") == 0 ||
                 strcmp(name, "ntohs") == 0 ||
-                strcmp(name, "print") == 0) {
+                strcmp(name, "print") == 0 ||
+                strcmp(name, "map_update") == 0 ||
+                strcmp(name, "map_lookup") == 0) {
 
                 struct Expr *e = parser_bool(p);
                 parser_match(p, SEMICOLON);
-                return (struct Stmt *)e;   /* 你的 Stmt/Expr 体系本来就混用 Node* */
+                return (struct Stmt *)e;
             }
         }
 
-        /* 其他情况，按原来的逻辑，当成赋值语句 */
         return parser_assign(p);
     }
 
@@ -782,13 +782,10 @@ struct Expr *parser_factor(struct Parser *p)
             parser_match(p, RPAREN);
             struct Expr *e = parser_unary(p);
 
-            /* ===== (struct T *)&ctx[k] ===== */
             if (e->base.tag == TAG_CTX_PTR) {
                 struct CtxPtrExpr *pp = (struct CtxPtrExpr *)e;
-
                 if (ty->tag == TYPE_PTR) {
                     struct PtrType *pt = (struct PtrType *)ty;
-
                     if (pt->to->tag == TYPE_STRUCT) {
                         pp->st        = (struct StructType *)pt->to;
                         pp->base.type = ty;
@@ -798,14 +795,11 @@ struct Expr *parser_factor(struct Parser *p)
                 parser_error(p, "unsupported cast on ctx pointer");
             }
 
-            /* ===== (struct T *)ctx ===== */
             if (e->base.tag == TAG_ID) {
                 struct Id *id = (struct Id *)e;
-
                 if (strcmp(id->base.op->lexeme, "ctx") == 0) {
                     if (ty->tag == TYPE_PTR) {
                         struct PtrType *pt = (struct PtrType *)ty;
-
                         if (pt->to->tag == TYPE_STRUCT) {
                             struct CtxPtrExpr *pp = ctx_ptr_new(0, ty);
                             pp->st = (struct StructType *)pt->to;
@@ -816,12 +810,10 @@ struct Expr *parser_factor(struct Parser *p)
                 }
             }
 
-            /* ===== normal cast ===== */
             e->type = ty;
             return e;
         }
 
-        /* grouped expression */
         x = parser_bool(p);
         parser_match(p, RPAREN);
         return x;
@@ -856,7 +848,8 @@ struct Expr *parser_factor(struct Parser *p)
             parser_match(p, LPAREN);
             struct Expr *arg = parser_bool(p);
             parser_match(p, RPAREN);
-            return (struct Expr *)builtin_call_new(NATIVE_NTOHL, arg);
+            struct Expr *args[1] = { arg };
+            return (struct Expr *)builtin_call_new(NATIVE_NTOHL, 1, args);
         }
 
         if (strcmp(p->look->lexeme, "ntohs") == 0) {
@@ -864,7 +857,8 @@ struct Expr *parser_factor(struct Parser *p)
             parser_match(p, LPAREN);
             struct Expr *arg = parser_bool(p);
             parser_match(p, RPAREN);
-            return (struct Expr *)builtin_call_new(NATIVE_NTOHS, arg);
+            struct Expr *args[1] = { arg };
+            return (struct Expr *)builtin_call_new(NATIVE_NTOHS, 1, args);
         }
 
         if (strcmp(p->look->lexeme, "print") == 0) {
@@ -872,8 +866,40 @@ struct Expr *parser_factor(struct Parser *p)
             parser_match(p, LPAREN);
             struct Expr *arg = parser_bool(p);
             parser_match(p, RPAREN);
-            return (struct Expr *)builtin_call_new(NATIVE_PRINTF, arg);
+            struct Expr *args[1] = { arg };
+            return (struct Expr *)builtin_call_new(NATIVE_PRINTF, 1, args);
         }
+
+        if (strcmp(p->look->lexeme, "map_lookup") == 0) {
+    parser_move(p);
+    parser_match(p, LPAREN);
+
+    struct Expr *mapid = parser_bool(p);   // 第一个参数：map_id
+    parser_match(p, COMMA);
+    struct Expr *key   = parser_bool(p);   // 第二个参数：key
+
+    parser_match(p, RPAREN);
+
+    struct Expr *args[2] = { mapid, key };
+    return (struct Expr *)builtin_call_new(NATIVE_MAP_LOOKUP, 2, args);
+}
+
+if (strcmp(p->look->lexeme, "map_update") == 0) {
+    parser_move(p);
+    parser_match(p, LPAREN);
+
+    struct Expr *mapid = parser_bool(p);   // map_id
+    parser_match(p, COMMA);
+    struct Expr *key   = parser_bool(p);   // key
+    parser_match(p, COMMA);
+    struct Expr *value = parser_bool(p);   // value
+
+    parser_match(p, RPAREN);
+
+    struct Expr *args[3] = { mapid, key, value };
+    return (struct Expr *)builtin_call_new(NATIVE_MAP_UPDATE, 3, args);
+}
+
 
         struct Id *id = env_get_var(p->top, p->look->lexeme);
         if (!id)
@@ -888,7 +914,6 @@ struct Expr *parser_factor(struct Parser *p)
         return NULL;
     }
 }
-
 
 static struct lexer_token TOK_MUL  = { STAR,  0, .lexeme = "*" };
 static struct lexer_token TOK_PLUS = { PLUS,  0, .lexeme = "+" };

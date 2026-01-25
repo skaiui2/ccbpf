@@ -5,18 +5,17 @@
 struct backend_layout default_bpf_layout(void)
 {
     struct backend_layout l = {
-        .temp_base  = 8,
+        .temp_base  = 64,
         .temp_count = 64,
-
-        .mem_a = MEM_A,
-        .mem_b = MEM_B,
-        .mem_c = MEM_C,
+        .mem_a = 8,   // x
+        .mem_b = 16,  // y
+        .mem_c = 24,  // key or uh 
 
         .mem_arr_base = {
-            MEM_ARR0,
-            MEM_ARR1,
-            MEM_ARR2,
-            MEM_ARR3,
+            32, // MEM_ARR0
+            40, // MEM_ARR1
+            48, // MEM_ARR2
+            56, // MEM_ARR3
         },
     };
     return l;
@@ -24,7 +23,7 @@ struct backend_layout default_bpf_layout(void)
 
 int temp_slot(const struct backend_layout *l, int t)
 {
-    return l->temp_base + t;
+    return l->temp_base + t * sizeof(u_long);
 }
 
 int map_array_base(const struct backend_layout *l, int base)

@@ -12,7 +12,7 @@
 
 struct hook_state {
     int attached;
-    struct ccbpf_program prog;
+    struct ccbpf_program *prog;  
 };
 
 static int g_hook_sock = -1;
@@ -54,7 +54,7 @@ static void hook_process_control_messages(void)
         char buf[512];
         ssize_t n = recv(g_hook_sock, buf, sizeof(buf) - 1, 0);
         if (n <= 0)
-            break;  
+            break;
 
         buf[n] = '\0';
 
@@ -67,11 +67,12 @@ static void hook_process_control_messages(void)
                 continue;
 
             if (g_udp_input_hook.attached) {
-                ccbpf_unload(&g_udp_input_hook.prog);
+                ccbpf_unload(g_udp_input_hook.prog);
+                g_udp_input_hook.prog = NULL;
                 g_udp_input_hook.attached = 0;
             }
 
-            g_udp_input_hook.prog = ccbpf_load(path);
+            g_udp_input_hook.prog = ccbpf_load(path);  
             g_udp_input_hook.attached = 1;
 
             printf("[hook] ATTACH hook_udp_input: %s\n", path);
@@ -86,7 +87,8 @@ static void hook_process_control_messages(void)
                 continue;
 
             if (g_udp_input_hook.attached) {
-                ccbpf_unload(&g_udp_input_hook.prog);
+                ccbpf_unload(g_udp_input_hook.prog);
+                g_udp_input_hook.prog = NULL;
                 g_udp_input_hook.attached = 0;
                 printf("[hook] DETACH hook_udp_input\n");
             }
@@ -98,18 +100,11 @@ uint32_t hook_udp_input(uint8_t *frame, int frame_size)
 {
     hook_process_control_messages();
 
-    if (!g_udp_input_hook.attached)
+    if (!g_udp_input_hook.attached || !g_udp_input_hook.prog)
         return 0;
 
-    return ccbpf_run_frame(&g_udp_input_hook.prog, frame, frame_size);
+    return ccbpf_run_frame(g_udp_input_hook.prog, frame, frame_size);
 }
-
-
-struct udp_ctx {
-    uint16_t sport;
-    uint16_t dport;
-};
-    #include <arpa/inet.h>
 
 int main(void)
 {
@@ -127,8 +122,12 @@ int main(void)
     pkt_bytes[3] = 1;
 
     for (;;) {
-        uint32_t r = hook_udp_input((uint8_t *)pkt_bytes, sizeof(pkt_bytes));
+        printf("[MAIN] pkt_bytes: %02x %02x %02x %02x\n",
+               pkt_bytes[0], pkt_bytes[1], pkt_bytes[2], pkt_bytes[3]);
+
+        uint32_t r = hook_udp_input(pkt_bytes, sizeof(pkt_bytes));
         printf("hook_udp_input() returned %u\n", r);
+
         sleep(1);
     }
 

@@ -340,7 +340,6 @@ static char *ctxexpr_tostring(struct Node *self)
 {
     struct CtxExpr *c = (struct CtxExpr *)self;
 
-    // 目前只支持 arg0/arg1，offset 分别是 0 和 4
     if (c->offset == 0)
         return strdup("ctx.arg0");
     else if (c->offset == 4)
@@ -365,15 +364,12 @@ struct Expr *ctx_load_expr_new(int offset)
 
     c->base.base.gen      = (void *)expr_gen;
     c->base.base.jumping  = NULL;
-    c->base.base.tostring = ctxexpr_tostring;   // 不再是 NULL
+    c->base.base.tostring = ctxexpr_tostring;  
 
     return &c->base;
 }
 
 /* Return */
-
-/* inter.c */
-
 static void return_gen(struct Node *self, int b, int a)
 {
     struct Return *r = (struct Return *)self;
@@ -414,7 +410,7 @@ static char *builtin_tostring(struct Node *self)
     return buf;
 }
 
-struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
+struct BuiltinCall *builtin_call_new(int func_id, int argc, struct Expr **args)
 {
     struct BuiltinCall *b = malloc(sizeof(*b));
     b->base.base.tag      = TAG_BUILTIN_CALL;
@@ -430,17 +426,27 @@ struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
     switch (func_id) {
     case NATIVE_NTOHL:
         tok->lexeme   = strdup("ntohl");
-        b->base.type  = Type_Int; 
+        b->base.type  = Type_Int;
         break;
 
     case NATIVE_NTOHS:
         tok->lexeme   = strdup("ntohs");
-        b->base.type  = Type_Short; 
+        b->base.type  = Type_Short;
         break;
 
     case NATIVE_PRINTF:
         tok->lexeme   = strdup("print");
-        b->base.type  = Type_Int;   
+        b->base.type  = Type_Int;
+        break;
+
+    case NATIVE_MAP_LOOKUP:
+        tok->lexeme   = strdup("map_lookup");
+        b->base.type  = Type_Int; 
+        break;
+
+    case NATIVE_MAP_UPDATE:
+        tok->lexeme   = strdup("map_update");
+        b->base.type  = Type_Int;  
         break;
 
     default:
@@ -452,11 +458,14 @@ struct BuiltinCall *builtin_call_new(int func_id, struct Expr *arg)
     b->base.op = tok;
 
     b->func_id = func_id;
-    b->argc    = 1;
-    b->args[0] = arg;
+    b->argc    = argc;
+
+    for (int i = 0; i < argc; i++)
+        b->args[i] = args[i];
 
     return b;
 }
+
 
 
 /* ============================================================

@@ -43,7 +43,9 @@
 #define CBPF_H
 
 #include "bpf_types.h"
-
+#include <stdint.h>
+#include <stdio.h>
+#include "hashmap.h"
 /*
  * The instruction encondings.
  */
@@ -113,6 +115,38 @@ struct bpf_insn {
 	long	k;
 };
 
+
+#define CCBPF_MAGIC 0x43434250  /* 'C' 'C' 'B' 'P' */
+
+struct CCBPF_Header {
+    uint32_t magic;
+    uint16_t version;
+    uint16_t flags;
+
+    uint32_t code_offset;
+    uint32_t code_size;
+
+    uint32_t data_offset;
+    uint32_t data_size;
+
+    uint32_t entry;
+};
+
+#define CCBPF_MAX_MAPS 8
+
+struct ccbpf_program {
+    struct bpf_insn *insns; //.text
+    size_t insn_count;
+
+    uint8_t *data;     //.data or .radata
+    size_t data_size;
+
+    struct hashmap maps[CCBPF_MAX_MAPS]; 
+    size_t map_count;                
+
+    uint32_t entry;
+};
+
 /*
  * Macros for insn array initializers.
  */
@@ -124,6 +158,10 @@ struct bpf_insn {
  */
 #define BPF_MEMWORDS 64
 
-u_int bpf_filter(register struct bpf_insn *pc, register u_char *p, u_int wirelen, register u_int buflen);
+u_int ccbpf_vm_exec(struct ccbpf_program *prog,
+                    struct bpf_insn *pc,
+                    u_char *p,
+                    u_int wirelen,
+                    u_int buflen);
 	
 #endif

@@ -3,14 +3,17 @@
 #include <arpa/inet.h>
 #include "ccbpf.h" 
 
-struct ccbpf_program ccbpf_load(const char *path)
+struct ccbpf_program *ccbpf_load(const char *path)
 {
-    struct ccbpf_program prog = {0};
+    struct ccbpf_program *prog = calloc(1, sizeof(*prog));
+    if (!prog)
+        return NULL;
 
     FILE *fp = fopen(path, "rb");
     if (!fp) {
         perror("ccbpf_load fopen");
-        return prog;
+        free(prog);
+        return NULL;
     }
 
     struct CCBPF_Header hdr;
@@ -19,60 +22,61 @@ struct ccbpf_program ccbpf_load(const char *path)
     if (hdr.magic != CCBPF_MAGIC) {
         fprintf(stderr, "Invalid CCBPF magic\n");
         fclose(fp);
-        return prog;
+        free(prog);
+        return NULL;
     }
 
     fseek(fp, hdr.code_offset, SEEK_SET);
     size_t insn_count = hdr.code_size / sizeof(struct bpf_insn);
 
-    struct bpf_insn *insns = malloc(hdr.code_size);
-    fread(insns, sizeof(struct bpf_insn), insn_count, fp);
+    prog->insns = malloc(hdr.code_size);
+    fread(prog->insns, sizeof(struct bpf_insn), insn_count, fp);
 
-    uint8_t *data = NULL;
     if (hdr.data_size > 0) {
         fseek(fp, hdr.data_offset, SEEK_SET);
-        data = malloc(hdr.data_size);
-        fread(data, 1, hdr.data_size, fp);
+        prog->data = malloc(hdr.data_size);
+        fread(prog->data, 1, hdr.data_size, fp);
     }
 
     fclose(fp);
 
-    prog.insns = insns;
-    prog.insn_count = insn_count;
-    prog.data = data;
-    prog.data_size = hdr.data_size;
-    prog.entry = hdr.entry;
+    prog->insn_count = insn_count;
+    prog->data_size  = hdr.data_size;
+    prog->entry      = hdr.entry;
+
+    prog->map_count = CCBPF_MAX_MAPS;
+    for (size_t i = 0; i < prog->map_count; i++) {
+        hashmap_init(&prog->maps[i], 64, HASHMAP_KEY_INT);
+    }
 
     return prog;
 }
 
-void ccbpf_unload(struct ccbpf_program *p)
+void ccbpf_unload(struct ccbpf_program *prog)
 {
-    if (!p)
+    if (!prog)
         return;
 
-    if (p->insns) {
-        free(p->insns);
-        p->insns = NULL;
+    if (prog->insns)
+        free(prog->insns);
+
+    if (prog->data)
+        free(prog->data);
+
+    for (size_t i = 0; i < prog->map_count; i++) {
+        hashmap_destroy(&prog->maps[i]);
     }
 
-    if (p->data) {
-        free(p->data);
-        p->data = NULL;
-    }
-
-    p->insn_count = 0;
-    p->data_size = 0;
-    p->entry = 0;
+    free(prog);
 }
 
-
-uint32_t ccbpf_run_frame(struct ccbpf_program *p,
+uint32_t ccbpf_run_frame(struct ccbpf_program *prog,
                          void *frame,
                          size_t frame_size)
 {
-    return bpf_filter(p->insns,
-                      (unsigned char *)frame,
-                      frame_size,
-                      frame_size);
+    return ccbpf_vm_exec(prog,
+                         prog->insns,
+                         (unsigned char *)frame,
+                         frame_size,
+                         frame_size);
 }

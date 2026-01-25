@@ -43,6 +43,8 @@
 
 #include "cbpf.h"
 #include <arpa/inet.h>
+#include <stdlib.h>
+#include <memory.h>
 #include <stdio.h>
 
 #define BPF_ALIGN
@@ -62,259 +64,309 @@
 		 (u_long)*((u_char *)p+3)<<0)
 #endif
 
-/*
- * Execute the filter program starting at pc on the packet p
- * wirelen is the length of the original packet
- * buflen is the amount of data present
- */
 
-u_int bpf_filter(register struct bpf_insn *pc, register u_char *p, u_int wirelen, register u_int buflen)
+#define CCBPF_STACK_SIZE 512
+u_int ccbpf_vm_exec(struct ccbpf_program *prog,
+                    struct bpf_insn *pc,
+                    u_char *p,
+                    u_int wirelen,
+                    u_int buflen)
 {
-	register u_long A, X;
-	register int k;
-	long mem[BPF_MEMWORDS];
+    u_long A = 0, X = 0;
+    int k;
 
-	if (pc == 0)
-		/*
-		 * No filter means accept all.
-		 */
-		return (u_int)-1;
+    uint8_t mem[CCBPF_STACK_SIZE];
+    memset(mem, 0, sizeof(mem));
 
-	--pc;
-	while (1) {
-		++pc;
-		switch (pc->code) {
+    if (pc == 0)
+        return (u_int)-1;
 
-		default:
-			return 0;	
+    --pc;
+    for (;;) {
+        ++pc;
+        switch (pc->code) {
 
-		case BPF_RET|BPF_K:
-			return (u_int)pc->k;
+        default:
+            return 0;
 
-		case BPF_RET|BPF_A:
-			return (u_int)A;
+        case BPF_RET | BPF_K:
+            return (u_int)pc->k;
 
-		case BPF_LD|BPF_W|BPF_ABS:
-			k = pc->k;
-			if (k + sizeof(long) > buflen) {
-				return 0;
+        case BPF_RET | BPF_A:
+            return (u_int)A;
+
+        case BPF_LD | BPF_W | BPF_ABS:
+            k = pc->k;
+            if (k + sizeof(long) > buflen)
+                return 0;
+            A = EXTRACT_LONG(&p[k]);
+            continue;
+
+        case BPF_LD | BPF_H | BPF_ABS:
+            k = pc->k;
+            if (k + sizeof(short) > buflen)
+                return 0;
+            A = EXTRACT_SHORT(&p[k]);
+            continue;
+
+        case BPF_LD | BPF_B | BPF_ABS:
+            k = pc->k;
+            if (k >= buflen)
+                return 0;
+            A = p[k];
+            continue;
+
+        case BPF_LD | BPF_W | BPF_LEN:
+            A = wirelen;
+            continue;
+
+        case BPF_LDX | BPF_W | BPF_LEN:
+            X = wirelen;
+            continue;
+
+        case BPF_LD | BPF_W | BPF_IND:
+            k = X + pc->k;
+            if (k + sizeof(long) > buflen)
+                return 0;
+            A = EXTRACT_LONG(&p[k]);
+            continue;
+
+        case BPF_LD | BPF_H | BPF_IND:
+            k = X + pc->k;
+            if (k + sizeof(short) > buflen)
+                return 0;
+            A = EXTRACT_SHORT(&p[k]);
+            continue;
+
+        case BPF_LD | BPF_B | BPF_IND:
+            k = X + pc->k;
+            if (k >= buflen)
+                return 0;
+            A = p[k];
+            continue;
+
+        case BPF_LDX | BPF_MSH | BPF_B:
+            k = pc->k;
+            if (k >= buflen)
+                return 0;
+            X = (p[pc->k] & 0xf) << 2;
+            continue;
+
+        case BPF_LD | BPF_IMM:
+            A = pc->k;
+            continue;
+
+        case BPF_LDX | BPF_IMM:
+            X = pc->k;
+            continue;
+
+        case BPF_LD | BPF_MEM: {
+            size_t off = pc->k; 
+            if (off + sizeof(u_long) > CCBPF_STACK_SIZE)
+                return 0;
+            memcpy(&A, &mem[off], sizeof(u_long));
+            continue;
+        }
+
+        case BPF_LDX | BPF_MEM: {
+            size_t off = pc->k;  
+            if (off + sizeof(u_long) > CCBPF_STACK_SIZE)
+                return 0;
+            memcpy(&X, &mem[off], sizeof(u_long));
+            continue;
+        }
+
+        case BPF_ST: {
+            size_t off = pc->k; 
+            if (off + sizeof(u_long) > CCBPF_STACK_SIZE)
+                return 0;
+            memcpy(&mem[off], &A, sizeof(u_long));
+            continue;
+        }
+
+        case BPF_STX: {
+            size_t off = pc->k; 
+            if (off + sizeof(u_long) > CCBPF_STACK_SIZE)
+                return 0;
+            memcpy(&mem[off], &X, sizeof(u_long));
+            continue;
+        }
+
+        case BPF_JMP | BPF_JA:
+            pc += pc->k;
+            continue;
+
+        case BPF_JMP | BPF_JGT | BPF_K:
+            pc += (A > pc->k) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JGE | BPF_K:
+            pc += (A >= pc->k) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JEQ | BPF_K:
+            pc += (A == pc->k) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JSET | BPF_K:
+            pc += (A & pc->k) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JGT | BPF_X:
+            pc += (A > X) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JGE | BPF_X:
+            pc += (A >= X) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JEQ | BPF_X:
+            pc += (A == X) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_JMP | BPF_JSET | BPF_X:
+            pc += (A & X) ? pc->jt : pc->jf;
+            continue;
+
+        case BPF_ALU | BPF_ADD | BPF_X:
+            A += X;
+            continue;
+
+        case BPF_ALU | BPF_SUB | BPF_X:
+            A -= X;
+            continue;
+
+        case BPF_ALU | BPF_MUL | BPF_X:
+            A *= X;
+            continue;
+
+        case BPF_ALU | BPF_DIV | BPF_X:
+            if (X == 0)
+                return 0;
+            A /= X;
+            continue;
+
+        case BPF_ALU | BPF_AND | BPF_X:
+            A &= X;
+            continue;
+
+        case BPF_ALU | BPF_OR | BPF_X:
+            A |= X;
+            continue;
+
+        case BPF_ALU | BPF_LSH | BPF_X:
+            A <<= X;
+            continue;
+
+        case BPF_ALU | BPF_RSH | BPF_X:
+            A >>= X;
+            continue;
+
+        case BPF_ALU | BPF_ADD | BPF_K:
+            A += pc->k;
+            continue;
+
+        case BPF_ALU | BPF_SUB | BPF_K:
+            A -= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_MUL | BPF_K:
+            A *= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_DIV | BPF_K:
+            if (pc->k == 0)
+                return 0;
+            A /= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_AND | BPF_K:
+            A &= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_OR | BPF_K:
+            A |= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_LSH | BPF_K:
+            A <<= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_RSH | BPF_K:
+            A >>= pc->k;
+            continue;
+
+        case BPF_ALU | BPF_NEG:
+            A = -A;
+            continue;
+
+        case BPF_MISC | BPF_TAX:
+            X = A;
+            continue;
+
+        case BPF_MISC | BPF_TXA:
+            A = X;
+            continue;
+
+        case BPF_MISC | BPF_COP:
+            switch (pc->k) {
+            case NATIVE_NTOHL:
+                A = ntohl((u_long)A);
+                break;
+            case NATIVE_NTOHS:
+                A = ntohs((u_short)A);
+                break;
+            case NATIVE_PRINTF:
+                printf("%lu\n", (unsigned long)A);
+                A = 0;
+                break;
+
+            case NATIVE_MAP_LOOKUP: {
+    			uint32_t map_id = (uint32_t)X;
+    			uint32_t key    = (uint32_t)A;
+
+			    if (map_id >= prog->map_count) {
+			        A = 0;
+			        break;
+			    }
+
+			    void *val_ptr = hashmap_get(&prog->maps[map_id],
+			                                (void *)(uintptr_t)key);
+			    uint32_t val = val_ptr ? (uint32_t)(uintptr_t)val_ptr : 0;
+
+			    A = (u_long)val;
+   			    break;
 			}
 
-			A = EXTRACT_LONG(&p[k]);
-			continue;
+            case NATIVE_MAP_UPDATE: {
+    			uint32_t map_id = (uint32_t)X;
+    			uint32_t key    = (uint32_t)A;
 
-		case BPF_LD|BPF_H|BPF_ABS:
-			k = pc->k;
-			if (k + sizeof(short) > buflen) {
-				return 0;
-			}
-			A = EXTRACT_SHORT(&p[k]);
-			continue;
+			    if (map_id >= prog->map_count) {
+			        A = 0;
+			        break;
+			    }
 
-		case BPF_LD|BPF_B|BPF_ABS:
-			k = pc->k;
-			if (k >= buflen) {
-				return 0;
-			}
-			A = p[k];
-			continue;
+			    uint32_t value = 0;
+			    memcpy(&value, &mem[0], sizeof(uint32_t));
+			    hashmap_put(&prog->maps[map_id],
+			                (void *)(uintptr_t)key,
+			                (void *)(uintptr_t)value);
 
-		case BPF_LD|BPF_W|BPF_LEN:
-			A = wirelen;
-			continue;
-
-		case BPF_LDX|BPF_W|BPF_LEN:
-			X = wirelen;
-			continue;
-
-		case BPF_LD|BPF_W|BPF_IND:
-			k = X + pc->k;
-			if (k + sizeof(long) > buflen) {
-			    return 0;
+			    A = 0;
+			    break;
 			}
 
-			A = EXTRACT_LONG(&p[k]);
-			continue;
-
-		case BPF_LD|BPF_H|BPF_IND:
-			k = X + pc->k;
-			if (k + sizeof(short) > buflen) {				
-			    return 0;
-			}
-			A = EXTRACT_SHORT(&p[k]);
-			continue;
-
-		case BPF_LD|BPF_B|BPF_IND:
-			k = X + pc->k;
-			if (k >= buflen) {
-				return 0;
-			}
-			A = p[k];
-			continue;
-
-		case BPF_LDX|BPF_MSH|BPF_B:
-			k = pc->k;
-			if (k >= buflen) {
-				return 0;
-			}
-			X = (p[pc->k] & 0xf) << 2;
-			continue;
-
-		case BPF_LD|BPF_IMM:
-			A = pc->k;
-			continue;
-
-		case BPF_LDX|BPF_IMM:
-			X = pc->k;
-			continue;
-
-		case BPF_LD|BPF_MEM:
-			A = mem[pc->k];
-			continue;
-			
-		case BPF_LDX|BPF_MEM:
-			X = mem[pc->k];
-			continue;
-
-		case BPF_ST:
-			mem[pc->k] = A;
-			continue;
-
-		case BPF_STX:
-			mem[pc->k] = X;
-			continue;
-
-		case BPF_JMP|BPF_JA:
-			pc += pc->k;
-			continue;
-
-		case BPF_JMP|BPF_JGT|BPF_K:
-			pc += (A > pc->k) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JGE|BPF_K:
-			pc += (A >= pc->k) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JEQ|BPF_K:
-			pc += (A == pc->k) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JSET|BPF_K:
-			pc += (A & pc->k) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JGT|BPF_X:
-			pc += (A > X) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JGE|BPF_X:
-			pc += (A >= X) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JEQ|BPF_X:
-			pc += (A == X) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_JMP|BPF_JSET|BPF_X:
-			pc += (A & X) ? pc->jt : pc->jf;
-			continue;
-
-		case BPF_ALU|BPF_ADD|BPF_X:
-			A += X;
-			continue;
-			
-		case BPF_ALU|BPF_SUB|BPF_X:
-			A -= X;
-			continue;
-			
-		case BPF_ALU|BPF_MUL|BPF_X:
-			A *= X;
-			continue;
-			
-		case BPF_ALU|BPF_DIV|BPF_X:
-			if (X == 0)
-				return 0;
-			A /= X;
-			continue;
-			
-		case BPF_ALU|BPF_AND|BPF_X:
-			A &= X;
-			continue;
-			
-		case BPF_ALU|BPF_OR|BPF_X:
-			A |= X;
-			continue;
-
-		case BPF_ALU|BPF_LSH|BPF_X:
-			A <<= X;
-			continue;
-
-		case BPF_ALU|BPF_RSH|BPF_X:
-			A >>= X;
-			continue;
-
-		case BPF_ALU|BPF_ADD|BPF_K:
-			A += pc->k;
-			continue;
-			
-		case BPF_ALU|BPF_SUB|BPF_K:
-			A -= pc->k;
-			continue;
-			
-		case BPF_ALU|BPF_MUL|BPF_K:
-			A *= pc->k;
-			continue;
-			
-		case BPF_ALU|BPF_DIV|BPF_K:
-			A /= pc->k;
-			continue;
-			
-		case BPF_ALU|BPF_AND|BPF_K:
-			A &= pc->k;
-			continue;
-			
-		case BPF_ALU|BPF_OR|BPF_K:
-			A |= pc->k;
-			continue;
-
-		case BPF_ALU|BPF_LSH|BPF_K:
-			A <<= pc->k;
-			continue;
-
-		case BPF_ALU|BPF_RSH|BPF_K:
-			A >>= pc->k;
-			continue;
-
-		case BPF_ALU|BPF_NEG:
-			A = -A;
-			continue;
-
-		case BPF_MISC|BPF_TAX:
-			X = A;
-			continue;
-
-		case BPF_MISC|BPF_TXA:
-			A = X;
-			continue;
-
-		case BPF_MISC|BPF_COP: 
-			switch (pc->k) { 
-			case NATIVE_NTOHL: 
-				A = ntohl((u_long)A); 
-				break; 
-			case NATIVE_NTOHS: 
-				A = ntohs((u_short)A); 
-				break; 
-			case NATIVE_PRINTF: 
-				printf("%lu\n", (unsigned long)A); 
-				A = 0; 
-				break; 
-			} 
-			continue;
-		}
-	}
+            default:
+                A = 0;
+                break;
+            }
+            continue;
+        }
+    }
 }
+
+
 
 /*
  * Return true if the 'fcode' is a valid filter program.
