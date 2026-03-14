@@ -6,18 +6,41 @@ struct udp_hdr {
 int hook(void *ctx)
 {
     struct udp_hdr *uh;
-    unsigned int sport; 
-    unsigned int dport; 
-    uh = (struct udp_hdr *)ctx;
+    unsigned int sport;
+    unsigned int dport;
+    unsigned int count;
+    unsigned int last;
+
+    uh = (struct udp_hdr *)&ctx[0];
+
     sport = ntohs(uh->sport);
     dport = ntohs(uh->dport);
 
-    print("UDP ");
+    print("=== packet ===\n");
+
     print("sport=");
     print(sport);
-    print(" dport=");
+    print("\n");
+
+    print("dport=");
     print(dport);
     print("\n");
 
-    return 0;
+    count = map_lookup(0, sport);
+    count = count + 1;
+    map_update(0, sport, count);
+
+    print("count=");
+    print(count);
+    print("\n");
+
+    map_update(1, sport, dport);
+
+    last = map_lookup(1, sport);
+
+    print("last_dport=");
+    print(last);
+    print("\n");
+
+    return sport + dport;
 }
