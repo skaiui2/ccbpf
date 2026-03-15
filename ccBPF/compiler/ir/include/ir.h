@@ -57,7 +57,7 @@ struct IR {
 
     int label;
 
-    int func_id;
+    int native_id;
     int arg_width;
     int argc;    //arg count 
     int args[4]; //arg temp_no 

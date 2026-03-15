@@ -1,5 +1,6 @@
 #include "lexer.h"
 #include "heap.h"
+#include "parser.h"
 #include "inter.h"
 #include "symbols.h"
 #include <ctype.h>
@@ -9,6 +10,7 @@
 
 mg_region_handle frontend_region;
 mg_region_handle longterm_region;
+mg_region_handle string_region;
 mg_region_handle ir_region;
 
 static const char *lexer_buf = NULL;
@@ -95,10 +97,11 @@ void lexer_init(struct lexer *lex)
     lexer_reserve(lex, "struct", STRUCT);
 }
 
-void compiler_init(uint8_t region_bit, uint32_t cap, uint32_t ir_cap)
+void compiler_init(uint8_t region_bit, uint32_t cap, uint32_t string_cap, uint32_t ir_cap)
 {
     frontend_region = mg_region_create_pool(region_bit);
     longterm_region = mg_region_create_bump(cap);
+    string_region = mg_region_create_bump(string_cap);
     ir_region = mg_region_create_bump(ir_cap);
     init_stmt_singletons();
     init_constant_singletons();
@@ -107,6 +110,7 @@ void compiler_init(uint8_t region_bit, uint32_t cap, uint32_t ir_cap)
 void frontend_destroy(struct lexer *lex)
 {
     hashmap_destroy(&lex->words);
+    hashmap_destroy(&native_decl_table);
     symbol_destroy();
     mg_region_destroy(frontend_region);
     mg_region_destroy(longterm_region);

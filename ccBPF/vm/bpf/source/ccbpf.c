@@ -14,20 +14,30 @@ struct hook_entry {
     struct hook_node *head;
 };
 
-static struct hook_entry g_hooks[] = {
-        { "hook_udp_input", NULL },
-        { "hook_tcp_input", NULL },
-        { "hook_sched", NULL },
-        { NULL, NULL }
-};
+struct hashmap hook_table;
+
+struct hashmap native_table;
+
+static char *heap_strdup(const char *s)
+{
+    size_t n = strlen(s) + 1;
+    char *p = heap_malloc(n);
+    memcpy(p, s, n);
+    return p;
+}
+
+void hook_register(const char *name)
+{
+    struct hook_entry *e = heap_malloc(sizeof(*e));
+    e->name = heap_strdup(name);
+    e->head = NULL;
+
+    hashmap_put(&hook_table, (void*)e->name, e);
+}
 
 static struct hook_entry *find_hook(const char *name)
 {
-    for (int i = 0; g_hooks[i].name; i++) {
-        if (strcmp(g_hooks[i].name, name) == 0)
-            return &g_hooks[i];
-    }
-    return NULL;
+    return hashmap_get(&hook_table, (void*)name);
 }
 
 int hook_attach(const char *hook_name, uint8_t *image, size_t len)
@@ -86,6 +96,17 @@ uint32_t hook_run(const char *hook_name, uint8_t *frame, size_t frame_size)
     }
 
     return last_ret;
+}
+
+
+void native_register(int func_id, int argc, native_fn_t fn)
+{
+    struct native_entry *e = heap_malloc(sizeof(*e));
+    e->func_id = func_id;
+    e->argc    = argc;
+    e->fn      = fn;
+
+    hashmap_put(&native_table, (void*)(uintptr_t)func_id, e);
 }
 
 struct ccbpf_program *ccbpf_load_from_memory(const uint8_t *image, size_t len)
@@ -209,4 +230,10 @@ uint32_t ccbpf_run_frame(struct ccbpf_program *prog,
                          (unsigned char *)frame,
                          frame_size,
                          frame_size);
+}
+
+void ccbpf_system_init(void)
+{
+    hashmap_init(&hook_table, 32, HASHMAP_KEY_STRING);
+    hashmap_init(&native_table, 32, HASHMAP_KEY_INT);
 }

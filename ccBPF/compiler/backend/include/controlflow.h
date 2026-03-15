@@ -13,7 +13,7 @@ struct pending {
 };
 
 
-#define MAX_PENDING_JUMPS  1024
+#define MAX_PENDING_JUMPS  128
 
 void lower_if_false(const struct backend_layout *l,
                     struct bpf_builder *b,

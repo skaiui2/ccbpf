@@ -1,6 +1,5 @@
 #include "inter.h"
 #include "ir.h"
-#include "bpf_types.h"
 #include "parser.h"
 #include "heap.h"
 #include <stdlib.h>
@@ -91,16 +90,12 @@ int node_newlabel(void)
 
 void node_emitlabel(int i)
 {
-#if COMPILER_DEBUG_ENABLED
     printf("L%d:\n", i);
 
     struct IR ir = {0};
     ir.op    = IR_LABEL;
     ir.label = i;
     ir_emit(ir);
-#else
-    (void)i;
-#endif
 }
 
 void node_emit(const char *fmt, ...)
@@ -177,7 +172,7 @@ static struct Node *expr_gen(struct Node *self)
         struct IR ir = {0};
         ir.op        = IR_NATIVE_CALL;
         ir.dst       = e->temp_no;
-        ir.func_id   = b->func_id;
+        ir.native_id   = b->native_id;
         ir.argc      = b->argc;
         ir.arg_width = b->base.type->width;
 
@@ -373,22 +368,32 @@ struct Return *return_new(struct Expr *expr)
     return r;
 }
 
-/*builtin call*/
 static char *builtin_tostring(struct Node *self)
 {
     struct BuiltinCall *b = (struct BuiltinCall *)self;
     char *name = token_to_string(b->base.op);
-    char *arg = b->args[0]->base.tostring((struct Node *)b->args[0]);
 
+    if (b->argc == 0) {
+        size_t len = strlen(name) + 3;
+        char *buf = mg_region_alloc(longterm_region, len);
+        snprintf(buf, len, "%s()", name);
+        return buf;
+    }
+
+    char *arg = b->args[0]->base.tostring((struct Node *)b->args[0]);
     size_t len = strlen(name) + strlen(arg) + 4;
-    char *buf = mg_region_alloc(longterm_region,len);
+    char *buf = mg_region_alloc(longterm_region, len);
     snprintf(buf, len, "%s(%s)", name, arg);
     return buf;
 }
 
-struct BuiltinCall *builtin_call_new(int func_id, int argc, struct Expr **args)
+struct BuiltinCall *builtin_call_new(const char *name,
+                                     int native_id,
+                                     int argc,
+                                     struct Expr **args)
 {
     struct BuiltinCall *b = mg_region_alloc(longterm_region, sizeof(*b));
+
     b->base.base.tag      = TAG_BUILTIN_CALL;
     b->base.base.gen      = (void *)expr_gen;
     b->base.base.jumping  = expr_jumping;
@@ -397,51 +402,21 @@ struct BuiltinCall *builtin_call_new(int func_id, int argc, struct Expr **args)
     b->base.temp_no = 0;
 
     struct lexer_token *tok = mg_region_alloc(longterm_region, sizeof(*tok));
-    tok->tag = ID;
+    tok->tag    = ID;
+    tok->lexeme = region_mg_strdup(name);   
 
-    switch (func_id) {
-        case NATIVE_NTOHL:
-            tok->lexeme   = region_mg_strdup("ntohl");
-            b->base.type  = Type_Int;
-            break;
+    b->base.op   = tok;
 
-        case NATIVE_NTOHS:
-            tok->lexeme   = region_mg_strdup( "ntohs");
-            b->base.type  = Type_Short;
-            break;
+    b->base.type = Type_Int;
 
-        case NATIVE_PRINTF:
-            tok->lexeme   = region_mg_strdup("print");
-            b->base.type  = Type_Int;
-            break;
+    b->native_id = native_id;
 
-        case NATIVE_MAP_LOOKUP:
-            tok->lexeme   = region_mg_strdup("map_lookup");
-            b->base.type  = Type_Int;
-            break;
-
-        case NATIVE_MAP_UPDATE:
-            tok->lexeme   = region_mg_strdup("map_update");
-            b->base.type  = Type_Int;
-            break;
-
-        default:
-            tok->lexeme   = region_mg_strdup("builtin");
-            b->base.type  = Type_Int;
-            break;
-    }
-
-    b->base.op = tok;
-
-    b->func_id = func_id;
-    b->argc    = argc;
-
+    b->argc = argc;
     for (int i = 0; i < argc; i++)
         b->args[i] = args[i];
 
     return b;
 }
-
 
 struct Stmt *Stmt_Null      = NULL;
 struct Stmt *Stmt_Enclosing = NULL;
@@ -835,27 +810,42 @@ static void rel_jumping(struct Node *self, int t, int f)
     if (f != 0) {
         struct IR ir = {0};
         ir.op    = IR_IF_FALSE;
-        ir.src1  = r->base.e1->temp_no;
-        ir.src2  = r->base.e2->temp_no;
         ir.label = f;
 
         switch (r->relop) {
             case AST_LT:
-                ir.relop = IR_GE;   // a < b → !(a >= b)
-                break;
-            case AST_LE:
-                ir.relop = IR_GT;   // a <= b → !(a > b)
-                break;
-            case AST_GT:
+                ir.src1  = r->base.e2->temp_no;
+                ir.src2  = r->base.e1->temp_no;
                 ir.relop = IR_GT;
                 break;
-            case AST_GE:
+
+            case AST_LE:
+                ir.src1  = r->base.e2->temp_no;
+                ir.src2  = r->base.e1->temp_no;
                 ir.relop = IR_GE;
                 break;
+
+            case AST_GT:
+                ir.src1  = r->base.e1->temp_no;
+                ir.src2  = r->base.e2->temp_no;
+                ir.relop = IR_GT;
+                break;
+
+            case AST_GE:
+                ir.src1  = r->base.e1->temp_no;
+                ir.src2  = r->base.e2->temp_no;
+                ir.relop = IR_GE;
+                break;
+
             case AST_EQ:
+                ir.src1  = r->base.e1->temp_no;
+                ir.src2  = r->base.e2->temp_no;
                 ir.relop = IR_EQ;
                 break;
+
             case AST_NE:
+                ir.src1  = r->base.e1->temp_no;
+                ir.src2  = r->base.e2->temp_no;
                 ir.relop = IR_NE;
                 break;
         }
@@ -868,7 +858,7 @@ static void rel_jumping(struct Node *self, int t, int f)
     char *op = token_to_string(r->base.base.op);
 
     size_t len = strlen(s1) + strlen(op) + strlen(s2) + 5;
-    char *test = mg_region_alloc(longterm_region,len);
+    char *test = mg_region_alloc(longterm_region, len);
     snprintf(test, len, "%s %s %s", s1, op, s2);
 
     node_emit_jumps(test, t, f);
@@ -912,11 +902,16 @@ int intern_string(const char *s)
     int id = string_pool_count++;
 
     size_t n = strlen(s) + 1;
-    char *p = mg_region_alloc(longterm_region, n);
+    char *p = mg_region_alloc(string_region, n);
     memcpy(p, s, n);
 
     string_pool[id] = p;
     return id;
+}
+
+void string_count_stats()
+{
+    printf("string_pool_count:%u\r\n", string_pool_count);
 }
 
 static char *unescape_c_string(const char *s)
@@ -1090,11 +1085,28 @@ static void if_gen(struct Node *self, int b, int a)
 {
     struct If *i = (struct If *)self;
 
-    int label = node_newlabel();
+    int Lthen = node_newlabel();
+    int Lelse = node_newlabel();
+    int Lend  = node_newlabel();
 
-    i->expr->base.jumping((struct Node *)i->expr, 0, a);
-    node_emitlabel(label);
-    i->stmt->base.gen((struct Node *)i->stmt, label, a);
+    // if (!cond) goto Lelse
+    i->expr->base.jumping((struct Node *)i->expr, 0, Lelse);
+
+    // then:
+    node_emitlabel(Lthen);
+    i->stmt->base.gen((struct Node *)i->stmt, Lthen, a);
+
+    // goto end
+    struct IR ir = {0};
+    ir.op    = IR_GOTO;
+    ir.label = Lend;
+    ir_emit(ir);
+
+    // else:
+    node_emitlabel(Lelse);
+
+    // end:
+    node_emitlabel(Lend);
 }
 
 struct If *if_new(struct Expr *expr, struct Stmt *stmt)
@@ -1114,17 +1126,24 @@ static void else_gen(struct Node *self, int b, int a)
 {
     struct Else *e = (struct Else *)self;
 
-    int label1 = node_newlabel();
-    int label2 = node_newlabel();
+    int Lthen = node_newlabel();
+    int Lelse = node_newlabel();
+    int Lend  = node_newlabel();
 
-    e->expr->base.jumping((struct Node *)e->expr, 0, label2);
+    e->expr->base.jumping((struct Node *)e->expr, 0, Lelse);
 
-    node_emitlabel(label1);
-    e->stmt1->base.gen((struct Node *)e->stmt1, label1, a);
-    node_emit("goto L%d", a);
+    node_emitlabel(Lthen);
+    e->stmt1->base.gen((struct Node *)e->stmt1, Lthen, a);
 
-    node_emitlabel(label2);
-    e->stmt2->base.gen((struct Node *)e->stmt2, label2, a);
+    struct IR ir = {0};
+    ir.op    = IR_GOTO;
+    ir.label = Lend;
+    ir_emit(ir);
+
+    node_emitlabel(Lelse);
+    e->stmt2->base.gen((struct Node *)e->stmt2, Lelse, a);
+
+    node_emitlabel(Lend);
 }
 
 struct Else *else_new(struct Expr *expr, struct Stmt *s1, struct Stmt *s2)
@@ -1144,17 +1163,8 @@ struct Else *else_new(struct Expr *expr, struct Stmt *s1, struct Stmt *s2)
 static void set_gen(struct Node *self, int b, int a)
 {
     struct Set *s = (struct Set *)self;
-    struct Expr *e = s->expr;
-    if (e == NULL) {
-        return;
-    }
 
     expr_gen((struct Node *)s->expr);
-
-    char *lhs = s->id->base.base.tostring((struct Node *)s->id);
-    char *rhs = s->expr->base.tostring((struct Node *)s->expr);
-
-    node_emit("%s = %s", lhs, rhs);
 
     struct IR ir = {0};
     ir.op          = IR_STORE;
@@ -1162,8 +1172,11 @@ static void set_gen(struct Node *self, int b, int a)
     ir.array_index = 0;
     ir.array_width = s->id->base.type->width;
     ir.src1        = s->expr->temp_no;
-
     ir_emit(ir);
+
+    char *lhs = s->id->base.base.tostring((struct Node *)s->id);
+    char *rhs = s->expr->base.tostring((struct Node *)s->expr);
+    node_emit("%s = %s", lhs, rhs);
 }
 
 struct Set *set_new(struct Id *id, struct Expr *expr)

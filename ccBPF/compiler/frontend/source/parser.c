@@ -1,7 +1,7 @@
 #include "parser.h"
-#include "bpf_types.h"
 #include "inter.h"
 #include "mg_alloc.h"
+#include "hashmap.h"
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
@@ -26,6 +26,25 @@ extern struct Type     *Type_Byte;
 extern struct Type     *Type_Short;
 extern struct Constant *Constant_true;
 extern struct Constant *Constant_false;
+
+
+struct NativeDecl {
+    const char *name;
+    int         id;     
+    int         argc;
+};
+
+struct hashmap native_decl_table; 
+
+void native_decl_register(const char *name, int id, int argc)
+{
+    struct NativeDecl *d = mg_region_alloc(longterm_region, sizeof(*d));
+    d->name = region_strdup(name);
+    d->id   = id;
+    d->argc = argc;
+
+    hashmap_put(&native_decl_table, (void*)d->name, d);
+}
 
 static struct Type *basic_type_from_token(struct lexer_token *tok)
 {
@@ -116,6 +135,7 @@ static void parser_match(struct Parser *p, int tag)
 
 struct Parser *parser_new(struct lexer *lex)
 {
+    hashmap_init(&native_decl_table, 16, HASHMAP_KEY_STRING);
     struct Parser *p = mg_region_alloc(longterm_region, sizeof(struct Parser));
     p->lex  = lex;
     p->top  = env_new(NULL);
@@ -523,12 +543,10 @@ struct Stmt *parser_stmt(struct Parser *p)
             if (p->look->tag == ID && p->look->lexeme) {
                 const char *name = p->look->lexeme;
 
-                if (strcmp(name, "ntohl") == 0 ||
-                    strcmp(name, "ntohs") == 0 ||
-                    strcmp(name, "print") == 0 ||
-                    strcmp(name, "map_update") == 0 ||
-                    strcmp(name, "map_lookup") == 0)
-                {
+                struct NativeDecl *decl =
+                hashmap_get(&native_decl_table, (void*)name);
+
+                if (decl) {
                     struct Expr *e = parser_bool(p);
                     parser_match(p, SEMICOLON);
                     return (struct Stmt *)e;
@@ -806,77 +824,42 @@ struct Expr *parser_factor(struct Parser *p)
             return x;
 
         case ID: {
-            if (!p->look->lexeme)
+            const char *name = p->look->lexeme;
+            if (!name)
                 parser_error(p, "identifier without lexeme");
 
-            if (strcmp(p->look->lexeme, "ntohl") == 0) {
-                parser_move(p);
-                parser_match(p, LPAREN);
-                struct Expr *arg = parser_bool(p);
-                parser_match(p, RPAREN);
-                struct Expr *args[1] = { arg };
-                return (struct Expr *)builtin_call_new(NATIVE_NTOHL, 1, args);
-            }
+            struct NativeDecl *decl =
+                hashmap_get(&native_decl_table, (void*)name);
 
-            if (strcmp(p->look->lexeme, "ntohs") == 0) {
-                parser_move(p);
-                parser_match(p, LPAREN);
-                struct Expr *arg = parser_bool(p);
-                parser_match(p, RPAREN);
-                struct Expr *args[1] = { arg };
-                return (struct Expr *)builtin_call_new(NATIVE_NTOHS, 1, args);
-            }
-
-            if (strcmp(p->look->lexeme, "print") == 0) {
+            if (decl) {
                 parser_move(p);
                 parser_match(p, LPAREN);
 
-                struct Expr *arg = NULL;
+                struct Expr *args[4];
+                int argc = 0;
 
-                if (p->look->tag == STRING) {
-                    arg = parser_factor(p);
-                    parser_match(p, RPAREN);
-                    struct Expr *args[1] = { arg };
-                    return (struct Expr *)builtin_call_new(NATIVE_PRINT_STR, 1, args);
+                if (p->look->tag != RPAREN) {
+                    while (1) {
+                        args[argc++] = parser_bool(p);
+                        if (p->look->tag == COMMA) {
+                            parser_move(p);
+                            continue;
+                        }
+                        break;
+                    }
                 }
 
-                arg = parser_bool(p);
-                parser_match(p, RPAREN);
-                struct Expr *args[1] = { arg };
-                return (struct Expr *)builtin_call_new(NATIVE_PRINTF, 1, args);
-            }
-
-            if (strcmp(p->look->lexeme, "map_lookup") == 0) {
-                parser_move(p);
-                parser_match(p, LPAREN);
-
-                struct Expr *mapid = parser_bool(p);
-                parser_match(p, COMMA);
-                struct Expr *key   = parser_bool(p);
-
                 parser_match(p, RPAREN);
 
-                struct Expr *args[2] = { mapid, key };
-                return (struct Expr *)builtin_call_new(NATIVE_MAP_LOOKUP, 2, args);
+                return (struct Expr *)builtin_call_new(
+                    name,
+                    decl->id,
+                    argc,
+                    args
+                );
             }
 
-            if (strcmp(p->look->lexeme, "map_update") == 0) {
-                parser_move(p);
-                parser_match(p, LPAREN);
-
-                struct Expr *mapid = parser_bool(p);
-                parser_match(p, COMMA);
-                struct Expr *key   = parser_bool(p);
-                parser_match(p, COMMA);
-                struct Expr *value = parser_bool(p);
-
-                parser_match(p, RPAREN);
-
-                struct Expr *args[3] = { mapid, key, value };
-                return (struct Expr *)builtin_call_new(NATIVE_MAP_UPDATE, 3, args);
-            }
-
-            struct Id *id = env_get_var(p->top, p->look->lexeme);
+            struct Id *id = env_get_var(p->top, name);
             if (!id)
                 parser_error(p, "undeclared id");
 

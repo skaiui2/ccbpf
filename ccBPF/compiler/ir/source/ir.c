@@ -69,7 +69,7 @@ void ir_emit(struct IR ir)
 
         case IR_NATIVE_CALL:
             printf("[IR] NATIVE_CALL func=%d dst=t%d argc=%d (args: t%d ...)\n",
-                   ir.func_id, ir.dst, ir.argc,
+                   ir.native_id, ir.dst, ir.argc,
                    ir.argc > 0 ? ir.args[0] : -1);
             break;
 

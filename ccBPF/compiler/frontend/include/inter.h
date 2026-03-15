@@ -10,9 +10,11 @@ void init_constant_singletons(void);
 void init_stmt_singletons(void);
 char *region_strdup(const char *s);
 
-#define STRING_POOL_SIZE  512
+#define STRING_POOL_SIZE  128
 extern char *string_pool[STRING_POOL_SIZE];
 extern int   string_pool_count;
+
+void string_count_stats();
 
 enum NodeTag {
     TAG_NODE = 0,
@@ -71,12 +73,16 @@ struct Expr *ctx_load_expr_new(int offset);
 
 struct BuiltinCall {
     struct Expr base;
-    int func_id;
-    int argc;
+    const char *name;    
+    int         native_id;
+    int         argc;
     struct Expr *args[4];
 };
 
-struct BuiltinCall *builtin_call_new(int func_id, int argc, struct Expr **args);
+struct BuiltinCall *builtin_call_new(const char *name,
+                                     int native_id,
+                                     int argc,
+                                     struct Expr **args);
 
 struct Stmt {
     struct Node base;

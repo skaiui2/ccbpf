@@ -42,7 +42,6 @@
 #ifndef CBPF_H
 #define CBPF_H
 
-#include "bpf_types.h"
 #include <stdint.h>
 #include <stdio.h>
 #include "hashmap.h"

@@ -53,6 +53,17 @@ static int send_cmd(const char *cmd)
     return (n < 0);
 }
 
+void native_init()
+{
+    native_decl_register("ntohl",      1, 1);
+    native_decl_register("ntohs",      2, 1);
+    native_decl_register("print",      3, 1);
+    native_decl_register("print_str",  4, 1);
+    native_decl_register("map_lookup", 5, 2);
+    native_decl_register("map_update", 6, 3);
+    native_decl_register("now_ms",     7, 0);
+}
+
 static int compile_to_bpf(const char *src_path, const char *out_path)
 {
     char *src = load_file(src_path);
@@ -61,25 +72,29 @@ static int compile_to_bpf(const char *src_path, const char *out_path)
         return 1;
     }
 
-    compiler_init(16, 20*1024, 10*1024);
+    compiler_init(16, 30*1024, 1*1024, 15*1024);
 
     struct lexer lex;
     lexer_init(&lex);
     lexer_set_input_buffer(src, strlen(src));
 
     struct Parser *p = parser_new(&lex);
+
+    native_init();
     parser_program(p);
 
     mg_region_print_pools(frontend_region);
     mg_region_print_pools(longterm_region);
+    mg_region_print_pools(string_region);
     mg_region_print_pools(ir_region);
     frontend_destroy(&lex);
 
     heap_get_stats();
     struct bpf_builder b;
-    bpf_builder_init(&b, 40*1024);
+    bpf_builder_init(&b, 24*1024);
 
     heap_get_stats();
+    string_count_stats();
 
     struct ir_mes im;
     ir_mes_get(&im);
@@ -89,8 +104,9 @@ static int compile_to_bpf(const char *src_path, const char *out_path)
     struct bpf_insn *prog = bpf_builder_data(&b);
     int prog_len = bpf_builder_count(&b);
 
+    ir_free();
     size_t image_len = 0;
-    uint8_t *image = ccbpf_pack_memory(prog, prog_len, &image_len);
+    uint8_t *image = ccbpf_pack_memory(prog, 7*1024, prog_len, &image_len);
 
     FILE *out = fopen(out_path, "wb");
     if (!out) {

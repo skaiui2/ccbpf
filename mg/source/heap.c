@@ -4,7 +4,7 @@
 #include <string.h>
 
 #define PTR_SIZE        uint64_t
-#define CONFIG_HEAP     (100 * 1024)
+#define CONFIG_HEAP     (60 * 1024)
 #define ALIGNMENT_BYTE  0x07
 
 #define MIN_SIZE ((size_t)(heap_struct_size << 1))

@@ -101,12 +101,120 @@ static uint64_t now_ms(void)
     return (uint64_t)ts.tv_sec * 1000 + ts.tv_nsec / 1000000;
 }
 
+uint32_t native_ntohl(struct ccbpf_program *p,
+                      uint32_t a0,
+                      uint32_t a1,
+                      uint32_t a2,
+                      uint32_t a3)
+{
+    return ntohl(a0);
+}
+
+uint32_t native_ntohs(struct ccbpf_program *p,
+                      uint32_t a0,
+                      uint32_t a1,
+                      uint32_t a2,
+                      uint32_t a3)
+{
+    return ntohs((uint16_t)a0);
+}
+
+uint32_t native_printf(struct ccbpf_program *p,
+                       uint32_t a0,
+                       uint32_t a1,
+                       uint32_t a2,
+                       uint32_t a3)
+{
+    printf("%u", a0); 
+    return 0;
+}
+
+uint32_t native_print_str(struct ccbpf_program *p,
+                          uint32_t a0,
+                          uint32_t a1,
+                          uint32_t a2,
+                          uint32_t a3)
+{
+    if (a0 >= (uint32_t)p->string_count)
+        return 0;
+
+    printf("%s", p->strings[a0]);
+    return 0;
+}
+
+uint32_t native_map_lookup(struct ccbpf_program *p,
+                           uint32_t a0,
+                           uint32_t a1,
+                           uint32_t a2,
+                           uint32_t a3)
+{
+    uint32_t map_id = a0;
+    uint32_t key    = a1;
+
+    if (map_id >= p->map_count)
+        return 0;
+
+    void *val_ptr = hashmap_get(&p->maps[map_id],
+                                (void *)(uintptr_t)key);
+    return val_ptr ? (uint32_t)(uintptr_t)val_ptr : 0;
+}
+
+uint32_t native_map_update(struct ccbpf_program *p,
+                           uint32_t a0,
+                           uint32_t a1,
+                           uint32_t a2,
+                           uint32_t a3)
+{
+    uint32_t map_id = a0;
+    uint32_t key    = a1;
+    uint32_t value  = a2;
+
+    if (map_id >= p->map_count)
+        return 0;
+
+    hashmap_put(&p->maps[map_id],
+                (void *)(uintptr_t)key,
+                (void *)(uintptr_t)value);
+
+    return 0;
+}
+
+uint32_t native_now_ms(struct ccbpf_program *p,
+                       uint32_t a0,
+                       uint32_t a1,
+                       uint32_t a2,
+                       uint32_t a3)
+{
+    return (uint32_t)(now_ms() & 0xFFFFFFFF);
+}
+
+void native_register_all(void)
+{
+    native_register(1, 1, native_ntohl);
+
+    native_register(2, 1, native_ntohs);
+
+    native_register(3, 2, native_printf);
+
+    native_register(4, 1, native_print_str);
+
+    native_register(5, 2, native_map_lookup);
+
+    native_register(6, 3, native_map_update);
+
+    native_register(7, 0, native_now_ms);
+}
+
 static uint64_t g_pkt_count = 0;
 static uint64_t g_byte_count = 0;
 static uint64_t g_last_ts = 0;
 
 int main(void)
 {
+    ccbpf_system_init();
+    native_register_all();
+    hook_register("hook_udp_input");
+
     if (hook_control_init() < 0)
         return 1;
 

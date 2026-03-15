@@ -15,6 +15,6 @@
 #define MEM_ARR3   6
 
 void ir_lower_program(struct IR *head, int label_count, struct bpf_builder *b);
-
+void ir_free();
 
 #endif

@@ -1,5 +1,6 @@
 #include "ir_lowering.h"
 #include "layout.h"
+#include "lexer.h"
 #include "selection.h"
 #include "controlflow.h"
 #include <stdlib.h>
@@ -29,6 +30,7 @@ void ir_lower_program(struct IR *head, int label_count,
         case IR_ADD:
         case IR_SUB:
         case IR_MUL:
+        case IR_DIV:
             lower_binop(&layout, b, ir);
             break;
 
@@ -70,97 +72,45 @@ void ir_lower_program(struct IR *head, int label_count,
         }
 
         case IR_NATIVE_CALL: {
-            int dst_slot  = temp_slot(&layout, ir->dst);
+            int dst_slot = temp_slot(&layout, ir->dst);
 
-            switch (ir->func_id) {
+            for (int i = 0; i < ir->argc; i++) {
+                int arg_slot = temp_slot(&layout, ir->args[i]);
 
-            case NATIVE_NTOHL:
-            case NATIVE_NTOHS:
-            case NATIVE_PRINTF: {
-                int arg0_slot = temp_slot(&layout, ir->args[0]);
-                bpf_builder_emit(b, (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot)); 
-                if (ir->func_id == NATIVE_PRINTF) { 
-                    bpf_builder_emit(b, (struct bpf_insn)BPF_STMT(BPF_LDX | BPF_IMM, ir->arg_width)); 
+                if (i == 0) {
+                    bpf_builder_emit(b,
+                        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg_slot));
+                } else if (i == 1) {
+                    bpf_builder_emit(b,
+                        (struct bpf_insn)BPF_STMT(BPF_LDX | BPF_MEM, arg_slot));
+                } else if (i == 2) {
+                    bpf_builder_emit(b,
+                        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg_slot));
+                    bpf_builder_emit(b,
+                        (struct bpf_insn)BPF_STMT(BPF_ST, 0));
+                } else if (i == 3) {
+                    bpf_builder_emit(b,
+                        (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg_slot));
+                    bpf_builder_emit(b,
+                        (struct bpf_insn)BPF_STMT(BPF_ST, 4));
+                } else {
+                    fprintf(stderr, "too many args for native call\n");
+                    exit(1);
                 }
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
-                                              ir->func_id));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
-                break;
             }
-            case NATIVE_PRINT_STR: {
+
+            if (ir->argc > 0) {
                 int arg0_slot = temp_slot(&layout, ir->args[0]);
-
                 bpf_builder_emit(b,
                     (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, arg0_slot));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP, NATIVE_PRINT_STR));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
-                break;
             }
 
+            bpf_builder_emit(b,
+                (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
+                                          ir->native_id));
 
-            case NATIVE_MAP_LOOKUP: {
-                int map_id_slot = temp_slot(&layout, ir->args[0]);
-                int key_slot    = temp_slot(&layout, ir->args[1]);
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, key_slot));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LDX | BPF_MEM, map_id_slot));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
-                                              NATIVE_MAP_LOOKUP));
-
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
-                break;
-            }
-
-            case NATIVE_MAP_UPDATE: {
-                int map_id_slot = temp_slot(&layout, ir->args[0]);
-                int key_slot    = temp_slot(&layout, ir->args[1]);
-                int value_slot  = temp_slot(&layout, ir->args[2]);
-
-                // A = value
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, value_slot));
-                // mem[0] = value
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_ST, 0));
-                // A = key
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_MEM, key_slot));
-                // X = map_id
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LDX | BPF_MEM, map_id_slot));
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_MISC | BPF_COP,
-                                              NATIVE_MAP_UPDATE));
-                int dst_slot = temp_slot(&layout, ir->dst);
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
-                break;
-            }
-
-            default:
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_LD | BPF_IMM, 0));
-                bpf_builder_emit(b,
-                    (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
-                break;
-            }
+            bpf_builder_emit(b,
+                (struct bpf_insn)BPF_STMT(BPF_ST, dst_slot));
             break;
         }
 
@@ -203,6 +153,7 @@ void ir_lower_program(struct IR *head, int label_count,
             break;
 
         default:
+            printf("ir_lowering abort\r\n");
             abort();
         }
     }
@@ -216,4 +167,9 @@ void ir_lower_program(struct IR *head, int label_count,
         printf("%3d: code=0x%04x jt=%u jf=%u k=%ld\n",
                i, prog[i].code, prog[i].jt, prog[i].jf, prog[i].k);
     }
+}
+
+void ir_free()
+{
+    mg_region_destroy(ir_region);
 }

@@ -18,10 +18,6 @@ void lower_move(const struct backend_layout *l,
         (struct bpf_insn)BPF_STMT(BPF_ST, dst));
 }
 
-/*
- * IR_ADD / IR_SUB / IR_MUL:
- *   t_dst = t_src1 (+|-|*) t_src2
- */
 void lower_binop(const struct backend_layout *l,
                  struct bpf_builder *b, struct IR *ir)
 {
@@ -32,7 +28,8 @@ void lower_binop(const struct backend_layout *l,
     uint16_t op =
         (ir->op == IR_ADD) ? (BPF_ALU | BPF_ADD | BPF_X) :
         (ir->op == IR_SUB) ? (BPF_ALU | BPF_SUB | BPF_X) :
-                             (BPF_ALU | BPF_MUL | BPF_X);
+        (ir->op == IR_MUL) ? (BPF_ALU | BPF_MUL | BPF_X) :
+                             (BPF_ALU | BPF_DIV | BPF_X);
 
     bpf_builder_emit(b,
         (struct bpf_insn)BPF_STMT(BPF_LD  | BPF_MEM, a));

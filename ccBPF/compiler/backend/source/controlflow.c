@@ -6,6 +6,33 @@
 #include "cbpf.h"
 #include "controlflow.h"
 
+static int pending_count_global = 0;
+static int pending_peak_global  = 0;
+static size_t pending_bytes_global = 0;
+
+static void pending_add(struct pending *pj, int *pj_count,
+                        int insn, int label, int is_cond, int true_branch)
+{
+    if (*pj_count >= MAX_PENDING_JUMPS) {
+        fprintf(stderr, "[FATAL] pending overflow (%d/%d)\n",
+                *pj_count, MAX_PENDING_JUMPS);
+        abort();
+    }
+
+    struct pending *p = &pj[*pj_count];
+
+    p->insn        = insn;
+    p->label       = label;
+    p->is_cond     = is_cond;
+    p->true_branch = true_branch;
+
+    (*pj_count)++;
+
+    pending_count_global++;
+    pending_bytes_global += sizeof(struct pending);
+    if (pending_count_global > pending_peak_global)
+        pending_peak_global = pending_count_global;
+}
 
 static unsigned short relop_to_bpf(enum IR_RelOp r)
 {
@@ -42,19 +69,11 @@ void lower_if_false(const struct backend_layout *l,
     insn = bpf_builder_emit(b,
         (struct bpf_insn)BPF_JUMP(jop, 0, 0, 0));
 
-    if (*pj_count >= MAX_PENDING_JUMPS) {
-        abort();
-    }
-
     int true_branch = 0;         
     if (ir->relop == IR_NE)
         true_branch = 1;       
 
-    (*pj)[*pj_count].insn        = insn;
-    (*pj)[*pj_count].label       = ir->label;
-    (*pj)[*pj_count].is_cond     = 1;
-    (*pj)[*pj_count].true_branch = true_branch;
-    (*pj_count)++;
+    pending_add(*pj, pj_count, insn, ir->label, 1, true_branch);
 }
 
 void lower_goto(struct bpf_builder *b,
@@ -65,15 +84,7 @@ void lower_goto(struct bpf_builder *b,
     int insn = bpf_builder_emit(b,
         (struct bpf_insn)BPF_JUMP(BPF_JMP | BPF_JA, 0, 0, 0));
 
-    if (*pj_count >= MAX_PENDING_JUMPS) {
-        abort();
-    }
-
-    (*pj)[*pj_count].insn        = insn;
-    (*pj)[*pj_count].label       = ir->label;
-    (*pj)[*pj_count].is_cond     = 0;
-    (*pj)[*pj_count].true_branch = 0;
-    (*pj_count)++;
+    pending_add(*pj, pj_count, insn, ir->label, 0, 0);
 }
 
 void lower_label(int *label_pc,
@@ -124,5 +135,10 @@ void patch_jumps(struct bpf_builder *b,
             ins[from].k = rel;
         }
     }
+    printf("[MEM] pending_jumps: count=%d, peak=%d, bytes=%zu (cap=%d entries)\n",
+       pending_count_global,
+       pending_peak_global,
+       pending_bytes_global,
+       MAX_PENDING_JUMPS);
 }
 

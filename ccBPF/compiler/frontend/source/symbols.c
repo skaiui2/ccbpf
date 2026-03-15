@@ -3,11 +3,11 @@
 #include "heap.h"
 #include "lexer.h"
 
-#define ALL_MAP_SIZE 8
-#define STRUCT_MAP_SIZE 8
-#define ENUM_MAP_SIZE 8
-#define ENV_VAR_MAP_SIZE 32
-#define ENV_TYPE_MAP_SIZE 16
+#define ALL_MAP_SIZE 32
+#define STRUCT_MAP_SIZE 32
+#define ENUM_MAP_SIZE 32
+#define ENV_VAR_MAP_SIZE 64
+#define ENV_TYPE_MAP_SIZE 32
 
 static struct hashmap *all_hashmaps[ALL_MAP_SIZE];
 static int hashmap_count = 0;

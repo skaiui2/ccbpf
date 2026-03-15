@@ -6,6 +6,7 @@
 #include <stdint.h>
 
 mg_region_handle backend_region;
+mg_region_handle pack_region;
 
 void bpf_builder_init(struct bpf_builder *b, uint32_t cap)
 {
@@ -26,8 +27,10 @@ void bpf_builder_free(struct bpf_builder *b)
     b->insns    = NULL;
     b->count    = 0;
     b->capacity = 0;
+
+    mg_region_destroy(string_region);
     mg_region_destroy(backend_region);
-    mg_region_destroy(ir_region);
+    mg_region_destroy(pack_region);
 }
 
 void bpf_builder_reset(struct bpf_builder *b)
@@ -72,10 +75,12 @@ int bpf_builder_count(struct bpf_builder *b)
     return b->count;
 }
 
-uint8_t *ccbpf_pack_memory(struct bpf_insn *insns,
+uint8_t *ccbpf_pack_memory(struct bpf_insn *insns, 
+                           size_t cap,
                            size_t insn_count,
                            size_t *out_len)
 {
+    pack_region = mg_region_create_bump(cap);
     struct CCBPF_Header hdr = (struct CCBPF_Header){0};
 
     hdr.magic   = CCBPF_MAGIC;
@@ -100,7 +105,7 @@ uint8_t *ccbpf_pack_memory(struct bpf_insn *insns,
                        + hdr.code_size
                        + hdr.data_size;
 
-    uint8_t *buf = mg_region_alloc(backend_region, total_len);
+    uint8_t *buf = mg_region_alloc(pack_region, total_len);
     if (!buf)
         return NULL;
 

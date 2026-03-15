@@ -5,6 +5,8 @@
 #include "symbols.h"
 #include "inter.h"
 
+extern struct hashmap native_decl_table; 
+
 struct Parser {
     struct lexer       *lex;
     struct lexer_token *look;
@@ -12,6 +14,7 @@ struct Parser {
     int                 used;
 };
 
+void native_decl_register(const char *name, int id, int argc);
 char *token_to_string(struct lexer_token *tok);
 
 struct Parser *parser_new(struct lexer *lex);
