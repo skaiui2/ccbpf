@@ -1,4 +1,4 @@
-# ccbpf — A Lightweight Compiler and Virtual Machine for Embedded Systems
+# ccbpf — A tiny eBPF-like system for MCUs
 
 [中文介绍](docs/中文/readme中文.md)
 
@@ -255,14 +255,6 @@ sudo ./nodeA ../../hello.c -o out.ccbpf
 
 You will see compiler output, including IR dumps and memory usage information.
 
-### Attach Program
-
-```
-sudo ./nodeA attach hook_udp_input out.ccbpf
-```
-
-nodeB output will immediately change:
-
 ```
 skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf/nodeA/build$ sudo ./nodeA ../../hello.c -o out.ccbpf
 L1:
@@ -285,13 +277,15 @@ L1:
 ........
 ```
 
-### Detach Program
+
+
+### Attach Program
 
 ```
-sudo ./nodeA detach hook_udp_input
+sudo ./nodeA attach hook_udp_input out.ccbpf
 ```
 
-nodeB output returns to normal:
+nodeB output will immediately change:
 
 ```
 [wirefisher] pps=37, bps=7696
@@ -315,5 +309,33 @@ add=235
 tokens2=2864
 [PASS] sport=10000 dport=20000 len=208 tokens=2656
 now_time=32082325
+```
+
+### Detach Program
+
+```
+sudo ./nodeA detach hook_udp_input
+```
+
+nodeB output returns to normal:
+
+```
+last_ts=32096900
+add=80
+tokens2=976
+[DROP] sport=10000 dport=20000 len=208
+[hook] DETACH hook_udp_input
+[wirefisher] pps=37, bps=7696
+[wirefisher] pps=34, bps=7072
+[wirefisher] pps=34, bps=7072
+[wirefisher] pps=34, bps=7072
+[wirefisher] pps=35, bps=7280
+[wirefisher] pps=35, bps=7280
+[wirefisher] pps=35, bps=7280
+[wirefisher] pps=38, bps=7904
+[wirefisher] pps=38, bps=7904
+[wirefisher] pps=38, bps=7904
+[wirefisher] pps=39, bps=8112
+[wirefisher] pps=39, bps=8112
 ```
 
