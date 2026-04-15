@@ -1,0 +1,46 @@
+struct hook_ctx {
+    unsigned int flag_lo;
+    unsigned int flag_hi;
+    unsigned int func_lo;
+    unsigned int func_hi;
+};
+
+int hook(void *ctx)
+{
+    struct hook_ctx *h;
+    unsigned int flag_lo;
+    unsigned int func_lo;
+    unsigned int key;
+    unsigned int now;
+    unsigned int enter;
+    unsigned int dur;
+
+    h = (struct hook_ctx *)ctx;
+
+    flag_lo = h->flag_lo;
+    func_lo = h->func_lo;
+
+    key = func_lo;
+    now = now_time();
+
+    if (flag_lo == 1) {
+        print_str("{ func:");
+        prints(2);
+        print_str("\n");
+        map_update(0, key, now);
+        return 0;
+    }
+
+    if (flag_lo == 2) {
+        enter = map_lookup(0, key);
+        dur = now - enter;
+        print_str("} func:");
+        prints(2);
+        print_str(" dur:");
+        print(dur);
+        print_str("\n");
+        return 0;
+    }
+
+    return 0;
+}
