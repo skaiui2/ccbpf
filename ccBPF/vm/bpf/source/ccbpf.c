@@ -261,9 +261,3 @@ void ccbpf_system_init(void)
     hashmap_init(&hook_table, 32, HASHMAP_KEY_STRING);
     hashmap_init(&native_table, 32, HASHMAP_KEY_INT);
 }
-
-void ccbpf_system_init(void)
-{
-    hashmap_init(&hook_table, 32, HASHMAP_KEY_STRING);
-    hashmap_init(&native_table, 32, HASHMAP_KEY_INT);
-}

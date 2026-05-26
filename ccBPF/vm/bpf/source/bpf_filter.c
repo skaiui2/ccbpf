@@ -101,11 +101,11 @@ int ccbpf_ctx_unpack(struct ccbpf_ctx *ctx,
 }
 
 enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
-              struct ccbpf_program *prog,
-              unsigned char *p,
-              unsigned int wirelen,
-              unsigned int buflen,
-              int max_insn)
+                                struct ccbpf_program *prog,
+                                unsigned char *p,
+                                unsigned int wirelen,
+                                unsigned int buflen,
+                                int max_insn)
 {
     uint32_t A = ctx->A;
     uint32_t X = ctx->X;
@@ -140,39 +140,21 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
 
         case BPF_LD | BPF_W | BPF_ABS:
             k = ins->k;
-            if (k + (int)sizeof(long) > (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k + (int)sizeof(long) > (int)buflen) goto err;
             A = EXTRACT_LONG(&p[k]);
             pc++;
             continue;
 
         case BPF_LD | BPF_H | BPF_ABS:
             k = ins->k;
-            if (k + (int)sizeof(short) > (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k + (int)sizeof(short) > (int)buflen) goto err;
             A = EXTRACT_SHORT(&p[k]);
             pc++;
             continue;
 
         case BPF_LD | BPF_B | BPF_ABS:
             k = ins->k;
-            if (k >= (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k >= (int)buflen) goto err;
             A = p[k];
             pc++;
             continue;
@@ -189,52 +171,28 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
 
         case BPF_LD | BPF_W | BPF_IND:
             k = (int)X + ins->k;
-            if (k + (int)sizeof(long) > (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k + (int)sizeof(long) > (int)buflen) goto err;
             A = EXTRACT_LONG(&p[k]);
             pc++;
             continue;
 
         case BPF_LD | BPF_H | BPF_IND:
             k = (int)X + ins->k;
-            if (k + (int)sizeof(short) > (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k + (int)sizeof(short) > (int)buflen) goto err;
             A = EXTRACT_SHORT(&p[k]);
             pc++;
             continue;
 
         case BPF_LD | BPF_B | BPF_IND:
             k = (int)X + ins->k;
-            if (k >= (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k >= (int)buflen) goto err;
             A = p[k];
             pc++;
             continue;
 
         case BPF_LDX | BPF_MSH | BPF_B:
             k = ins->k;
-            if (k >= (int)buflen) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (k >= (int)buflen) goto err;
             X = (p[k] & 0xf) << 2;
             pc++;
             continue;
@@ -251,13 +209,7 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
 
         case BPF_LD | BPF_MEM: {
             size_t off = ins->k;
-            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) goto err;
             memcpy(&A, &ctx->mem[off], sizeof(uint32_t));
             pc++;
             continue;
@@ -265,13 +217,7 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
 
         case BPF_LDX | BPF_MEM: {
             size_t off = ins->k;
-            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) goto err;
             memcpy(&X, &ctx->mem[off], sizeof(uint32_t));
             pc++;
             continue;
@@ -279,13 +225,7 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
 
         case BPF_ST: {
             size_t off = ins->k;
-            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) goto err;
             memcpy(&ctx->mem[off], &A, sizeof(uint32_t));
             pc++;
             continue;
@@ -293,13 +233,7 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
 
         case BPF_STX: {
             size_t off = ins->k;
-            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (off + sizeof(uint32_t) > CCBPF_STACK_SIZE) goto err;
             memcpy(&ctx->mem[off], &X, sizeof(uint32_t));
             pc++;
             continue;
@@ -357,27 +291,21 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
             continue;
 
         case BPF_ALU | BPF_DIV | BPF_X:
-            if (X == 0) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (X == 0) goto err;
             A /= X;
             pc++;
             continue;
 
         case BPF_ALU | BPF_MOD | BPF_X:
-            if (X == 0)
-                return 0;
+            if (X == 0) goto err;
             A %= X;
+            pc++;
             continue;
 
         case BPF_ALU | BPF_MOD | BPF_K:
-            if (pc->k == 0)
-                return 0;
-            A %= pc->k;
+            if (ins->k == 0) goto err;
+            A %= ins->k;
+            pc++;
             continue;
 
         case BPF_ALU | BPF_AND | BPF_X:
@@ -416,13 +344,7 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
             continue;
 
         case BPF_ALU | BPF_DIV | BPF_K:
-            if (ins->k == 0) {
-                ctx->ret = 0;
-                ctx->A = A;
-                ctx->X = X;
-                ctx->pc = pc;
-                return CCBPF_ERROR;
-            }
+            if (ins->k == 0) goto err;
             A /= ins->k;
             pc++;
             continue;
@@ -501,6 +423,13 @@ enum ccbpf_status ccbpf_vm_step(struct ccbpf_ctx *ctx,
     ctx->X = X;
     ctx->pc = pc;
     return CCBPF_OK;
+
+err:
+    ctx->ret = 0;
+    ctx->A = A;
+    ctx->X = X;
+    ctx->pc = pc;
+    return CCBPF_ERROR;
 }
 
 enum ccbpf_status ccbpf_vm_run(struct ccbpf_ctx *ctx,
