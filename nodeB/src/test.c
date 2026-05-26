@@ -142,6 +142,26 @@ uint32_t native_print_str(struct ccbpf_program *p,
     return 0;
 }
 
+#define MAX_LOCAL_MAPS 8
+
+static struct hashmap g_local_maps[MAX_LOCAL_MAPS];
+static char g_local_map_inited = 0;
+
+static inline struct hashmap *get_map(uint32_t id)
+{
+    if (id >= MAX_LOCAL_MAPS)
+        return NULL;
+
+    if (!g_local_map_inited) {
+        for(int i = 0; i < MAX_LOCAL_MAPS; i++) {
+            hashmap_init(&g_local_maps[i], 128, HASHMAP_KEY_INT);
+        }
+        g_local_map_inited = 1;
+    }
+
+    return &g_local_maps[id];
+}
+
 uint32_t native_map_lookup(struct ccbpf_program *p,
                            uint32_t a0,
                            uint32_t a1,
@@ -151,12 +171,12 @@ uint32_t native_map_lookup(struct ccbpf_program *p,
     uint32_t map_id = a0;
     uint32_t key    = a1;
 
-    if (map_id >= p->map_count)
+    struct hashmap *m = get_map(map_id);
+    if (!m)
         return 0;
 
-    void *val_ptr = hashmap_get(&p->maps[map_id],
-                                (void *)(uintptr_t)key);
-    return val_ptr ? (uint32_t)(uintptr_t)val_ptr : 0;
+    void *val = hashmap_get(m, (void *)(uintptr_t)key);
+    return val ? (uint32_t)(uintptr_t)val : 0;
 }
 
 uint32_t native_map_update(struct ccbpf_program *p,
@@ -169,10 +189,11 @@ uint32_t native_map_update(struct ccbpf_program *p,
     uint32_t key    = a1;
     uint32_t value  = a2;
 
-    if (map_id >= p->map_count)
+    struct hashmap *m = get_map(map_id);
+    if (!m)
         return 0;
 
-    hashmap_put(&p->maps[map_id],
+    hashmap_put(m,
                 (void *)(uintptr_t)key,
                 (void *)(uintptr_t)value);
 

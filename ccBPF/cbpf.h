@@ -44,7 +44,6 @@
 
 #include <stdint.h>
 #include <stdio.h>
-#include "hashmap.h"
 /*
  * The instruction encondings.
  */
@@ -132,17 +131,12 @@ struct ccbpf_ctx {
     uint8_t  mem[CCBPF_STACK_SIZE];
 };
 
-#define CCBPF_MAX_MAPS 8
-
 struct ccbpf_program {
     struct bpf_insn *insns; //.text
     size_t insn_count;
 
     uint8_t *data;     //.data or .radata
-    size_t data_size;
-
-    struct hashmap maps[CCBPF_MAX_MAPS]; 
-    size_t map_count;                
+    size_t data_size;          
 
     uint32_t entry;
 

@@ -195,12 +195,6 @@ struct ccbpf_program *ccbpf_load_from_memory(const uint8_t *image, size_t len)
 
     prog->entry = hdr->entry;
 
-    prog->map_count = CCBPF_MAX_MAPS;
-    for (size_t i = 0; i < prog->map_count; i++) {
-        hashmap_init(&prog->maps[i], 64, HASHMAP_KEY_INT);
-        hashmap_clear(&prog->maps[i]);
-    }
-
     return prog;
 }
 
@@ -221,10 +215,6 @@ void ccbpf_unload(struct ccbpf_program *prog)
                 heap_free(prog->strings[i]);
         }
         heap_free(prog->strings);
-    }
-
-    for (size_t i = 0; i < prog->map_count; i++) {
-        hashmap_destroy(&prog->maps[i]);
     }
 
     heap_free(prog);
