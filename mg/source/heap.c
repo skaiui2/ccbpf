@@ -238,7 +238,7 @@ struct heap_stats heap_get_stats(void)
 
         node = node->next;
     }
-    printf("memory: %u\r\n", the_heap.all_size);
+    printf("memory: %lu\r\n", the_heap.all_size);
 
     return st;
 }

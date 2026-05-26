@@ -1,6 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 #include "ccbpf.h"
+#include "cbpf.h"
 #include "bpf_format.h"
 #include "heap.h"
 #include "hashmap.h"
@@ -120,23 +121,29 @@ struct ccbpf_program *ccbpf_load_from_memory(const uint8_t *image, size_t len)
     if (hdr->magic != CCBPF_MAGIC)
         return NULL;
 
-    struct ccbpf_program *prog = heap_malloc(sizeof(*prog));
-    if (!prog)
+    if (hdr->code_offset + hdr->code_size > len)
         return NULL;
-    memset(prog, 0, sizeof(*prog));
-
-    if (hdr->code_offset + hdr->code_size > len) {
-        heap_free(prog);
-        return NULL;
-    }
 
     size_t insn_count = hdr->code_size / sizeof(struct bpf_insn);
-    prog->insns = heap_malloc(hdr->code_size);
-    if (!prog->insns) {
-        heap_free(prog);
+    struct bpf_insn *insns = heap_malloc(hdr->code_size);
+    if (!insns)
+        return NULL;
+    memcpy(insns, image + hdr->code_offset, hdr->code_size);
+
+    if (!bpf_validate(insns, (int)insn_count)) {
+        printf("bpf_validate: reject, len=%zu\n", insn_count);
+        heap_free(insns);
         return NULL;
     }
-    memcpy(prog->insns, image + hdr->code_offset, hdr->code_size);
+
+    struct ccbpf_program *prog = heap_malloc(sizeof(*prog));
+    if (!prog) {
+        heap_free(insns);
+        return NULL;
+    }
+    memset(prog, 0, sizeof(*prog));
+
+    prog->insns = insns;
     prog->insn_count = insn_count;
 
     prog->string_count = 0;
@@ -227,11 +234,32 @@ uint32_t ccbpf_run_frame(struct ccbpf_program *prog,
                          void *frame,
                          size_t frame_size)
 {
-    return ccbpf_vm_exec(prog,
-                         prog->insns,
-                         (unsigned char *)frame,
-                         frame_size,
-                         frame_size);
+    struct ccbpf_ctx ctx;
+    memset(&ctx, 0, sizeof(ctx));
+
+    unsigned char *p = (unsigned char *)frame;
+    unsigned int wirelen = (unsigned int)frame_size;
+    unsigned int buflen  = (unsigned int)frame_size;
+
+    for (;;) {
+        enum ccbpf_status st =
+            ccbpf_vm_step(&ctx, prog, p, wirelen, buflen, 64);
+
+        if (st == CCBPF_FINISHED)
+            return ctx.ret;
+
+        if (st == CCBPF_ERROR)
+            return 0;
+
+        if (st == CCBPF_MIGRATE)
+            continue;
+    }
+}
+
+void ccbpf_system_init(void)
+{
+    hashmap_init(&hook_table, 32, HASHMAP_KEY_STRING);
+    hashmap_init(&native_table, 32, HASHMAP_KEY_INT);
 }
 
 void ccbpf_system_init(void)
