@@ -1607,6 +1607,9 @@ int scp_input(void *ctx, void *buf, size_t len)
     struct scp_hdr *sh;
     struct scp_stream *ss;
 
+    if (len < sizeof(struct scp_hdr) || len > MTU)
+        return -1;
+
     scp_debug_dump_rx(buf, len);
 
     sb = scp_buf_alloc(sizeof(struct scp_buf) + len);
