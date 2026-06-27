@@ -61,40 +61,30 @@ ccbpf 不是 eBPF 的移植，而是面向 MCU 重新设计的极简方案：
 - 编译近 100 条语句、生成 397 条指令：**峰值 < 60KB**
 - VM 虚拟机运行 <200 条指令的程序：1–2KB RAM
 
-
-
-# 文档
-
-详细设计文档请见：[设计文档](设计文档.md)
-
-使用参考：[使用文档](使用文档.md)
-
-
-
-## 运行
+# 快速运行demo
 
 ```
 git clone https://github.com/skaiui2/ccbpf.git
 cd ccbpf
+chmod +x *.sh
 ```
 
-然后再开两个终端，一个运行节点A（编译器），一个运行节点B（虚拟机）。
+## 动态注入程序demo
 
-运行节点nodeB：
+然后再开两个终端，一个运行节点A，一个运行节点B。
+
+运行节点nodeA：
 
 ```
-cd nodeB
-mkdir build
-cd build
-cmake ..
-make
-sudo ./nodeB
+./run_nodeA.sh
 ```
 
 然后你就能看到一些输出信息：
 
+这代表我们的nodeA程序正在运行，它会统计每一个UDP数据包。
+
 ```
-skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf_git/ccbpf/nodeB/build$ sudo ./nodeB 
+skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf_git/ccbpf/nodeB/build$ ./run_nodeA.sh
 [sudo] password for skaiuijing: 
 [wirefisher] pps=1, bps=208
 [wirefisher] pps=36, bps=7488
@@ -104,184 +94,15 @@ skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf_git/ccbpf/nodeB/build$ s
 [wirefisher] pps=40, bps=8320
 [wirefisher] pps=39, bps=8112
 [wirefisher] pps=37, bps=7696
-[wirefisher] pps=37, bps=7696
-[wirefisher] pps=35, bps=7280
-[wirefisher] pps=34, bps=7072
-[wirefisher] pps=37, bps=7696
 ```
 
-编译nodeA：
+我们要注入的demo程序是一个网络限速的令牌桶算法，使用命令：
 
 ```
-cd nodeA
-mkdir build
-cd build
-cmake ..
-make
+./attach.sh
 ```
 
-
-
-## demo
-
-找到根目录下的hello.c文件：
-
-我们可以这样编写我们要注入的程序：
-
-解析一个udp数据包，然后统计源端口相同的数据包的个数，不同的源端口单独计算。
-
-再用源端口作key，记录数据包的目的端口。
-
-前面的0，1这些是我们的map序号，我们可以配置支持多少个map。
-
-我们的demo是一个网络限速的令牌桶算法：
-
-```c
-struct udp_hdr {
-    unsigned short sport;
-    unsigned short dport;
-    unsigned short len;
-    unsigned short cksum;
-};
-
-int hook(void *ctx)
-{
-    struct udp_hdr *uh;
-    unsigned int sport;
-    unsigned int dport;
-    unsigned int len;
-    unsigned int now;
-    unsigned int tokens;
-    unsigned int last_ts;
-    unsigned int rate;
-    unsigned int burst;
-    unsigned int delta;
-    unsigned int add;
-
-    uh = (struct udp_hdr *)ctx;
-
-    sport = ntohs(uh->sport);
-    dport = ntohs(uh->dport);
-    len   = ntohs(uh->len);
-
-    now = now_ms();
-    print_str("now_time=");
-    print(now);
-    print_str("\n");
-
-    tokens  = map_lookup(0, sport);
-    print_str("tokens=");
-    print(tokens);
-    print_str("\n");
-    last_ts = map_lookup(1, sport);
-
-    print_str("last_ts=");
-    print(last_ts);
-    print_str("\n");
-
-    rate  = 5000;
-    burst = 3000;
-
-    if (last_ts == 0) {
-        tokens  = burst;
-        last_ts = now;
-    } else {
-        delta = now - last_ts;
-        add   = delta * rate / 1000;
-        print_str("add=");
-        print(add);
-        print_str("\n");
-        tokens = tokens + add;
-        if (tokens > burst)
-            tokens = burst;
-        last_ts = now;
-    }
-
-    print_str("tokens2=");
-    print(tokens);
-    print_str("\n");
-
-    if (tokens <= 1000) {
-        print_str("[DROP] sport=");
-        print(sport);
-        print_str(" dport=");
-        print(dport);
-        print_str(" len=");
-        print(len);
-        print_str("\n");
-
-        map_update(0, sport, tokens);
-        map_update(1, sport, last_ts);
-
-        return 0;
-    }
-
-    tokens = tokens - len;
-
-    map_update(0, sport, tokens);
-    map_update(1, sport, last_ts);
-
-    print_str("[PASS] sport=");
-    print(sport);
-    print_str(" dport=");
-    print(dport);
-    print_str(" len=");
-    print(len);
-    print_str(" tokens=");
-    print(tokens);
-    print_str("\n");
-
-    return sport + dport;
-}
-```
-
-
-
-### 编译
-
-把我们的hello.c文件位置传递给程序：
-
-```
-sudo ./nodeA ../../hello.c -o out.ccbpf
-```
-
-然后我们就能看到一堆编译器输出的打印：
-
-这里展示部分：
-
-```
-skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf/nodeA/build$ sudo ./nodeA ../../hello.c -o out.ccbpf
-L1:
-[IR] LABEL L1
-[IR] STORE MEM[8 + t0 * 8] <- t1
-[IR] LOAD_CTX t3 <- CTX[0]
-[IR] NATIVE_CALL func=2 dst=t2 argc=1 (args: t3 ...)
-[IR] STORE MEM[16 + t0 * 4] <- t2
-[IR] LOAD_CTX t5 <- CTX[2]
-[IR] NATIVE_CALL func=2 dst=t4 argc=1 (args: t5 ...)
-[IR] STORE MEM[20 + t0 * 4] <- t4
-[IR] LOAD_CTX t7 <- CTX[4]
-[IR] NATIVE_CALL func=2 dst=t6 argc=1 (args: t7 ...)
-[IR] STORE MEM[24 + t0 * 4] <- t6
-[IR] NATIVE_CALL func=7 dst=t8 argc=0 (args: t-1 ...)
-[IR] STORE MEM[28 + t0 * 4] <- t8
-[IR] MOVE  t10 <- 0
-[IR] NATIVE_CALL func=4 dst=t9 argc=1 (args: t10 ...)
-[IR] LOAD  t12 <- MEM[28 + t0 * 4]
-........
-```
-
-还有一些内存占用，因为内存管理算法是我们自己写的，所以我们可以根据内存占用调整前端、ir、后端分配的内存大小。
-
-### 附加程序
-
-使用命令：
-
-```
- sudo ./nodeA attach hook_udp_input out.ccbpf
-```
-
-我们会发现，nodeB的打印瞬间改变了：
+然后我们就能看到一堆编译器输出的打印，并且我们会发现，nodeA的打印瞬间改变了：
 
 ```
 [wirefisher] pps=37, bps=7696
@@ -297,17 +118,7 @@ tokens=2792
 last_ts=32082220
 add=45
 tokens2=2837
-[PASS] sport=10000 dport=20000 len=208 tokens=2629
-now_time=32082276
-tokens=2629
-last_ts=32082229
-add=235
-tokens2=2864
-[PASS] sport=10000 dport=20000 len=208 tokens=2656
-now_time=32082325
 ```
-
-
 
 我们的count统计会不断更新，同时解析udp数据包的源端口和目的端口。
 
@@ -318,10 +129,10 @@ now_time=32082325
 使用以下命令卸载我们的bpf程序：
 
 ```
- sudo ./nodeA detach hook_udp_input
+ ./detach.sh
 ```
 
-我们会发现，nodeB的输出又恢复正常了：
+我们会发现，nodeA的输出又恢复正常了：
 
 ```
 last_ts=32096900
@@ -338,8 +149,56 @@ tokens2=976
 [wirefisher] pps=35, bps=7280
 [wirefisher] pps=38, bps=7904
 [wirefisher] pps=38, bps=7904
-[wirefisher] pps=38, bps=7904
-[wirefisher] pps=39, bps=8112
-[wirefisher] pps=39, bps=8112
 ```
+
+## 执行迁移demo
+
+在这里，我们的程序会在nodeD先执行几行，接下来会迁移到nodeC执行剩下的代码：
+
+执行进程：
+
+```
+./run_nodeD.sh 
+```
+
+然后在另一个终端执行nodeC：
+
+```
+./run_nodeC.sh 
+```
+
+你会发现，程序在nodeC执行后，打印输出：
+
+```
+nodeC: runing....
+nodeC: 1
+nodeC: 2
+nodeC: 3
+nodeC: 4
+nodeC: 5
+nodeC: migration_start
+nodeC: migrate PC is 87
+```
+
+接下来nodeD开始输出：
+
+```
+nodeC: migration_end
+nodeC: 6
+nodeC: 7
+nodeC: 8
+nodeC: 9
+nodeC: 10
+nodeC: 11
+nodeC: ok!!!
+nodeD: finished 0
+```
+
+这就是发生了执行迁移，虚拟机被暂停，然后被打包到nodeD上继续执行。
+
+# 文档
+
+详细设计文档请见：[设计文档](设计文档.md)
+
+使用参考：[使用文档](使用文档.md)
 

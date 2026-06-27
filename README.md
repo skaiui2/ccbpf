@@ -70,46 +70,38 @@ Design goals:
 - **Tiny footprint**
 - **Embedded‑friendly**
 
-
-
 # Memory Usage
 
 - Compiling ~15 C statements on a 20KB‑RAM MCU: **~8KB**
 - Compiling ~100 statements → 397 BPF instructions: **<60KB peak**
 - VM running <200 instructions: **1–2KB RAM**
 
-# Documentation
 
-Design document: [design](docs/English/design.md)
-Usage reference: [usage](docs/English/usage.md)
 
-设计: [设计文档](docs/中文/设计文档.md)
-使用: [使用文档](docs/中文/使用文档.md)
+# Quick Run Demo
 
-## Run
-
-```
+```bash
 git clone https://github.com/skaiui2/ccbpf.git
 cd ccbpf
+chmod +x *.sh
 ```
 
-Open two terminals: one for nodeA (compiler), one for nodeB (VM).
+## Dynamic Program Injection Demo
 
-Run nodeB:
+Open two terminals: one runs nodeA, the other runs nodeB.
 
-```
-cd nodeB
-mkdir build
-cd build
-cmake ..
-make
-sudo ./nodeB
+Run nodeA:
+
+```bash
+./run_nodeA.sh
 ```
 
-You will see output like:
+You will then see some output information.
+
+This indicates that the nodeA program is running, and it is counting each UDP packet.
 
 ```
-skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf_git/ccbpf/nodeB/build$ sudo ./nodeB 
+skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf_git/ccbpf/nodeB/build$ ./run_nodeA.sh
 [sudo] password for skaiuijing: 
 [wirefisher] pps=1, bps=208
 [wirefisher] pps=36, bps=7488
@@ -119,173 +111,15 @@ skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf_git/ccbpf/nodeB/build$ s
 [wirefisher] pps=40, bps=8320
 [wirefisher] pps=39, bps=8112
 [wirefisher] pps=37, bps=7696
-[wirefisher] pps=37, bps=7696
-[wirefisher] pps=35, bps=7280
-[wirefisher] pps=34, bps=7072
-[wirefisher] pps=37, bps=7696
 ```
 
-Build nodeA:
+The demo program we inject implements a token-bucket rate limiting algorithm. Run:
 
-```
-cd nodeA
-mkdir build
-cd build
-cmake ..
-make
+```bash
+./attach.sh
 ```
 
-Then,
-
-Find `hello.c` in the project root.
-
-Here is an example program to inject:
-
-It parses a UDP packet, counts packets by source port, and records the destination port.
- The numbers 0, 1, etc. are map indices; you can configure how many maps to support.
-
-The demo implements a token‑bucket rate limiter:
-
-```c
-struct udp_hdr {
-    unsigned short sport;
-    unsigned short dport;
-    unsigned short len;
-    unsigned short cksum;
-};
-
-int hook(void *ctx)
-{
-    struct udp_hdr *uh;
-    unsigned int sport;
-    unsigned int dport;
-    unsigned int len;
-    unsigned int now;
-    unsigned int tokens;
-    unsigned int last_ts;
-    unsigned int rate;
-    unsigned int burst;
-    unsigned int delta;
-    unsigned int add;
-
-    uh = (struct udp_hdr *)ctx;
-
-    sport = ntohs(uh->sport);
-    dport = ntohs(uh->dport);
-    len   = ntohs(uh->len);
-
-    now = now_ms();
-    print_str("now_time=");
-    print(now);
-    print_str("\n");
-
-    tokens  = map_lookup(0, sport);
-    print_str("tokens=");
-    print(tokens);
-    print_str("\n");
-    last_ts = map_lookup(1, sport);
-
-    print_str("last_ts=");
-    print(last_ts);
-    print_str("\n");
-
-    rate  = 5000;
-    burst = 3000;
-
-    if (last_ts == 0) {
-        tokens  = burst;
-        last_ts = now;
-    } else {
-        delta = now - last_ts;
-        add   = delta * rate / 1000;
-        print_str("add=");
-        print(add);
-        print_str("\n");
-        tokens = tokens + add;
-        if (tokens > burst)
-            tokens = burst;
-        last_ts = now;
-    }
-
-    print_str("tokens2=");
-    print(tokens);
-    print_str("\n");
-
-    if (tokens <= 1000) {
-        print_str("[DROP] sport=");
-        print(sport);
-        print_str(" dport=");
-        print(dport);
-        print_str(" len=");
-        print(len);
-        print_str("\n");
-
-        map_update(0, sport, tokens);
-        map_update(1, sport, last_ts);
-
-        return 0;
-    }
-
-    tokens = tokens - len;
-
-    map_update(0, sport, tokens);
-    map_update(1, sport, last_ts);
-
-    print_str("[PASS] sport=");
-    print(sport);
-    print_str(" dport=");
-    print(dport);
-    print_str(" len=");
-    print(len);
-    print_str(" tokens=");
-    print(tokens);
-    print_str("\n");
-
-    return sport + dport;
-}
-```
-
-### Compile
-
-Pass the path to `hello.c`:
-
-```
-sudo ./nodeA ../../hello.c -o out.ccbpf
-```
-
-You will see compiler output, including IR dumps and memory usage information.
-
-```
-skaiuijing@skaiuijing-virtual-machine:~/Documents/ccbpf/nodeA/build$ sudo ./nodeA ../../hello.c -o out.ccbpf
-L1:
-[IR] LABEL L1
-[IR] STORE MEM[8 + t0 * 8] <- t1
-[IR] LOAD_CTX t3 <- CTX[0]
-[IR] NATIVE_CALL func=2 dst=t2 argc=1 (args: t3 ...)
-[IR] STORE MEM[16 + t0 * 4] <- t2
-[IR] LOAD_CTX t5 <- CTX[2]
-[IR] NATIVE_CALL func=2 dst=t4 argc=1 (args: t5 ...)
-[IR] STORE MEM[20 + t0 * 4] <- t4
-[IR] LOAD_CTX t7 <- CTX[4]
-[IR] NATIVE_CALL func=2 dst=t6 argc=1 (args: t7 ...)
-[IR] STORE MEM[24 + t0 * 4] <- t6
-[IR] NATIVE_CALL func=7 dst=t8 argc=0 (args: t-1 ...)
-[IR] STORE MEM[28 + t0 * 4] <- t8
-[IR] MOVE  t10 <- 0
-[IR] NATIVE_CALL func=4 dst=t9 argc=1 (args: t10 ...)
-[IR] LOAD  t12 <- MEM[28 + t0 * 4]
-........
-```
-
-
-
-### Attach Program
-
-```
-sudo ./nodeA attach hook_udp_input out.ccbpf
-```
-
-nodeB output will immediately change:
+You will then see a series of compiler outputs, and you will observe that the output of nodeA changes immediately:
 
 ```
 [wirefisher] pps=37, bps=7696
@@ -301,23 +135,21 @@ tokens=2792
 last_ts=32082220
 add=45
 tokens2=2837
-[PASS] sport=10000 dport=20000 len=208 tokens=2629
-now_time=32082276
-tokens=2629
-last_ts=32082229
-add=235
-tokens2=2864
-[PASS] sport=10000 dport=20000 len=208 tokens=2656
-now_time=32082325
 ```
 
-### Detach Program
+The count statistics will continuously update, while UDP packet source and destination ports are parsed.
 
-```
-sudo ./nodeA detach hook_udp_input
+Since the generated packets use fixed source and destination ports (with different sizes), only the counters will change.
+
+### Unload Program
+
+Use the following command to detach the BPF program:
+
+```bash
+./detach.sh
 ```
 
-nodeB output returns to normal:
+We will observe that the output of nodeA returns to normal:
 
 ```
 last_ts=32096900
@@ -334,8 +166,58 @@ tokens2=976
 [wirefisher] pps=35, bps=7280
 [wirefisher] pps=38, bps=7904
 [wirefisher] pps=38, bps=7904
-[wirefisher] pps=38, bps=7904
-[wirefisher] pps=39, bps=8112
-[wirefisher] pps=39, bps=8112
 ```
+
+## Execution Migration Demo
+
+In this demo, the program executes several steps on nodeD first, and then migrates to nodeC to continue execution.
+
+Start the process:
+
+```bash
+./run_nodeD.sh
+```
+
+Then in another terminal, run nodeC:
+
+```bash
+./run_nodeC.sh
+```
+
+You will see that after nodeC starts, the output is:
+
+```
+nodeC: running....
+nodeC: 1
+nodeC: 2
+nodeC: 3
+nodeC: 4
+nodeC: 5
+nodeC: migration_start
+nodeC: migrate PC is 87
+```
+
+Then nodeD continues printing:
+
+```
+nodeC: migration_end
+nodeC: 6
+nodeC: 7
+nodeC: 8
+nodeC: 9
+nodeC: 10
+nodeC: 11
+nodeC: ok!!!
+nodeD: finished 0
+```
+
+This demonstrates execution migration: the virtual machine is suspended, packaged, and then resumed on nodeD to continue execution.
+
+# Documentation
+
+Design document: [design](docs/English/design.md)
+Usage reference: [usage](docs/English/usage.md)
+
+设计: [设计文档](docs/中文/设计文档.md)
+使用: [使用文档](docs/中文/使用文档.md)
 
