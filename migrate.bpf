@@ -1,0 +1,49 @@
+int hook(void *ctx) 
+{
+    int a;
+    a = 1;
+
+    print_str("runing....");
+
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    print_str("migration_start");
+
+    migrate();
+
+    print_str("migration_end");
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    a = a + 1;
+    print(a);
+
+    print_str("ok!!!");
+
+    return 0;
+}

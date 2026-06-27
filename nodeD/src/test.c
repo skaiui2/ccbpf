@@ -38,13 +38,15 @@ static void recv_from_nodeC(uint8_t **img, size_t *img_len,
     close(fd);
 }
 
+
 uint32_t native_printf(struct ccbpf_program *p,
                        uint32_t a0,
                        uint32_t a1,
                        uint32_t a2,
                        uint32_t a3)
 {
-    printf("%u", a0);
+    printf("nodeC: %u\n", a0);
+    sleep(1);
     return 0;
 }
 
@@ -55,7 +57,8 @@ uint32_t native_print_str(struct ccbpf_program *p,
                           uint32_t a3)
 {
     if (a0 >= (uint32_t)p->string_count) return 0;
-    printf("%s", p->strings[a0]);
+    printf("nodeC: %s\n", p->strings[a0]);
+    sleep(1);
     return 0;
 }
 
