@@ -425,7 +425,7 @@ static int cmd_attachbpf(int argc, char **argv)
     uint8_t *img = heap_malloc(size);
     fs_read(ino, 0, img, size);
     fs_close(ino);
-
+    fs_sync();
     hook_attach(argv[1], img, size);
 
     heap_free(img);

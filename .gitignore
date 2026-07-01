@@ -56,3 +56,13 @@ dkms.conf
 
 **/build/
 **/build*/
+
+**/.idea/
+**/.idea/*
+**/.cmake/
+**/.cmake/*
+**/cmake-build-*/
+**/cmake-build-debug*/
+**/cmake-build-release*/
+**/cmake-build-*/
+**/cmake-build-*/**

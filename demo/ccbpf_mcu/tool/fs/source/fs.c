@@ -446,9 +446,15 @@ int fs_format(struct superblock *sb)
 
 int fs_sync(void)
 {
+    if (g_bdev->erase(g_bdev->ctx, 1) != 0)
+        return -1;
     if (g_bdev->write(g_bdev->ctx, 1, 0, InodeBitmap, sizeof(InodeBitmap)) != 0)
         return -1;
+    if (g_bdev->erase(g_bdev->ctx, 2) != 0)
+        return -1;
     if (g_bdev->write(g_bdev->ctx, 2, 0, BlockBitmap, sizeof(BlockBitmap)) != 0)
+        return -1;
+    if (g_bdev->erase(g_bdev->ctx, 3) != 0)
         return -1;
     if (g_bdev->write(g_bdev->ctx, 3, 0, DInodeArray, sizeof(DInodeArray)) != 0)
         return -1;
