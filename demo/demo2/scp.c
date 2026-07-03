@@ -849,6 +849,11 @@ static void scp_process_data(struct scp_stream *s, struct scp_buf *sb)
     // if segment overlaps left edge, trim to rcv_nxt
     if (SEQ_LT(seq, s->rcv_nxt)) {
         uint32_t trim = s->rcv_nxt - seq;
+        if (trim >= payload_len) {
+            scp_output(s, SCP_FLAG_ACK);
+            scp_buf_free(sb);
+            return;
+        }
         seq         += trim;
         payload_len -= trim;
 
