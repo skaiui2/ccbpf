@@ -137,7 +137,7 @@ void CdbOutput::writeAll(const char *project_root) {
         std::string out = "process/" + rel;
 
         char tmp[1024];
-        strcpy(tmp, out.c_str());
+        snprintf(tmp, sizeof(tmp), "%s", out.c_str());
         for (char *q = tmp + 1; *q; q++) {
             if (*q == '/') {
                 *q = 0;
