@@ -153,9 +153,9 @@ tokens2=976
 
 ## 执行迁移demo
 
-在这里，我们的程序会在nodeD先执行几行，接下来会迁移到nodeC执行剩下的代码：
+在这里，程序先在 nodeC 执行几行，再迁移到 nodeD 执行剩下的代码。
 
-执行进程：
+先启动接收进程：
 
 ```
 ./run_nodeD.sh 
@@ -198,7 +198,14 @@ nodeD: finished 0
 
 # 文档
 
-详细设计文档请见：[设计文档](设计文档.md)
+| 内容 | 中文 | English |
+| --- | --- | --- |
+| 语言、编译器、VM 与 Hook 使用 | [使用文档](使用文档.md) | [Usage](../English/usage.md) |
+| 编译器设计与完整执行示例 | [设计文档](设计文档.md) | [Design](../English/design.md) |
+| 执行迁移与硬件复现 | [执行迁移设计与复现](执行迁移设计与复现.md) | [Migration guide](../English/execution-migration.md) |
+| STM32F103C8T6 工程 | [单片机演示](../../demo/ccbpf_mcu/) | [MCU demo](../../demo/ccbpf_mcu/) |
 
-使用参考：[使用文档](使用文档.md)
+- [ccBPF 系统论文](../papers/ccBPF-Compiler-Runtime-and-Migration.pdf) · [LaTeX 源文件](../papers/ccBPF-Compiler-Runtime-and-Migration.tex)。
+- [执行迁移实验与运行方法](../../experiments/migration/README.md) · [独立复现程序](../../experiments/migration/migration_reproduce.c) · [完整实验脚本](../../experiments/migration/run_experiments.py)。
+- [工程目录说明](../../README.md#repository-layout)。
 

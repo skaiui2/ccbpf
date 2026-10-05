@@ -170,9 +170,9 @@ tokens2=976
 
 ## Execution Migration Demo
 
-In this demo, the program executes several steps on nodeD first, and then migrates to nodeC to continue execution.
+In this demo, the program executes several steps on nodeC, and then migrates to nodeD to continue execution.
 
-Start the process:
+Start the receiving process first:
 
 ```bash
 ./run_nodeD.sh
@@ -213,11 +213,41 @@ nodeD: finished 0
 
 This demonstrates execution migration: the virtual machine is suspended, packaged, and then resumed on nodeD to continue execution.
 
+# Repository Layout
+
+| Path | Purpose |
+| --- | --- |
+| `ccBPF/` | Core C-subset compiler (frontend, IR, backend), image format, and BPF VM. |
+| `mg/` · `lib/` | Memory allocators and shared containers/utilities used by the compiler and runtime. |
+| `nodeA/` · `nodeB/` | Host dynamic-extension demo: nodeA compiles and sends programs; nodeB runs the UDP hook host. |
+| `nodeC/` · `nodeD/` | Host execution-migration demo: nodeC starts the computation; nodeD receives and resumes it. |
+| `demo/ccbpf_mcu/` | STM32F103C8T6 firmware with the compiler, VM, filesystem, shell, and editor. |
+| `demo/demo1/` · `demo/demo2/` | Standalone demo integrations: dynamic attachment and SCP-based multi-node communication, respectively. These contain their own component versions. |
+| `ccbpf_file/` | Example source programs for filtering and performance exploration. |
+| `cdb/` | Clang-based source instrumentation tool for inserting hooks. |
+| `experiments/migration/` | Migration reproduction programs, experiment runner, and recorded results. |
+| `docs/` | English/Chinese documentation and the system paper in `docs/papers/`. |
+
+The root-level `hello.bpf` and `migrate.bpf` are inputs for the quick-run demos. The shell scripts launch, attach, or detach those demos; `gdb.py` provides a GDB structure-member watch command.
+
 # Documentation
 
-Design document: [design](docs/English/design.md)
-Usage reference: [usage](docs/English/usage.md)
+| Read or run | English | 中文 |
+| --- | --- | --- |
+| Source language, compiler APIs, VM, and hooks | [Usage](docs/English/usage.md) | [使用文档](docs/中文/使用文档.md) |
+| Compiler design and source-to-execution example | [Design](docs/English/design.md) | [设计文档](docs/中文/设计文档.md) |
+| Execution migration, hardware integration, and reproduction | [Migration guide](docs/English/execution-migration.md) | [执行迁移设计与复现](docs/中文/执行迁移设计与复现.md) |
+| STM32 firmware project | [STM32F103C8T6 demo](demo/ccbpf_mcu/) | [STM32F103C8T6 工程](demo/ccbpf_mcu/) |
 
-设计: [设计文档](docs/中文/设计文档.md)
-使用: [使用文档](docs/中文/使用文档.md)
+- System paper: [ccBPF: An Embedded C Compiler and Runtime for Dynamic Extension and Execution Migration](docs/papers/ccBPF-Compiler-Runtime-and-Migration.pdf) · [LaTeX source](docs/papers/ccBPF-Compiler-Runtime-and-Migration.tex).
+- Reproduce migration: [instructions and results](experiments/migration/README.md) · [single-program check](experiments/migration/migration_reproduce.c) · [full experiment runner](experiments/migration/run_experiments.py).
+- Recorded measurements: [summary](experiments/migration/results/2026-10-04/summary.json), [correctness](experiments/migration/results/2026-10-04/correctness.csv), [timings](experiments/migration/results/2026-10-04/timings.csv), and [allocations](experiments/migration/results/2026-10-04/heap.csv).
+
+Run the full host experiment from the repository root with Python 3 and a GCC-compatible compiler:
+
+```sh
+python experiments/migration/run_experiments.py --cc gcc --out /tmp/ccbpf-migration-results
+```
+
+On Windows, use a MinGW compiler path and an external output directory; the [experiment instructions](experiments/migration/README.md) include a PowerShell example. Generated executables, inputs, checkpoints, and logs stay in that output directory.
 

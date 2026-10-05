@@ -66,3 +66,18 @@ dkms.conf
 **/cmake-build-release*/
 **/cmake-build-*/
 **/cmake-build-*/**
+
+# Python caches
+__pycache__/
+*.py[cod]
+
+# LaTeX intermediate files (keep paper sources and PDFs)
+*.aux
+*.bbl
+*.blg
+*.fdb_latexmk
+*.fls
+*.synctex.gz
+*.toc
+docs/papers/*.log
+docs/papers/*.out
